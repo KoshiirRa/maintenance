@@ -190,7 +190,7 @@ if ($edition.Edition -notcontains "Home") {
     Write-Output "Home SKU, no query support, skipping to next step..."
     Write-Output "!!! ---- WARNING: Assume there will be errors on temp file cleanup since we can't ensure everyone is signed out. ---- !!!"
     $ErrorCount += 1
-    $ErrorLog += "Home SKU - WARMING - cannot log out users.  "
+    $ErrorLog += "Home SKU - WARNING - cannot log out users.  "
     $HomeSKU = $true
     #Maybe in the future use a Ninja task to reboot the PC and then run the script again with a flag.
     #DEV AREA
