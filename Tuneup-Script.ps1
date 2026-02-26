@@ -1,5 +1,5 @@
 #Author: Marty Marks
-#Revision: 2.0
+#Revision: 2.1
 #
 #History:
 #1 - initial commit
@@ -19,6 +19,7 @@
 #1.11 - add auto-install of winget
 #1.12 - enhanced winget script block, yay functions
 #2.0 - forking from original script
+#2.1 - added two lines to application cleanup to deal with the fact that Intuit never cleans up after itself.
 #
 #Description: Okay so this is a horrible, horrible idea, but I'm going to try and consolidate my 4-batch-file-plus-1-powershell-script tuneup process we had on Automate into a single powershell script.  Yes, I'm crazy.  Yes, this file is going to be full of a lot of bastardized code for a while.
 #
@@ -526,6 +527,9 @@ if (Test-Path -Path "$Env:ProgramData\Adobe") {
     Write-Output "---------------------------------"    
 }
 Get-ChildItem "$Env:SystemDrive\Users\*\AppData\Local\Microsoft.AAD.BrokerPlugin_cw5n1h2txyewy\*" -directory | ForEach {Remove-Item $_.FullName -Recurse -Force}
+Write-Output "Cleaning up Quickbooks's mess..."
+Get-ChildItem "C:\ProgramData\Intuit\QuickBooks 20*\Components\DownloadQB*\SPatch*.dat" -Force | Remove-Item -Recurse -Force
+Get-ChildItem "C:\ProgramData\Intuit\QuickBooks 20*\Components\QBUpdateCache" -Force | Remove-Item -Recurse -Force
 
 #STEP 13 - Use Winget to upgrade specific applications
 if ($SkipAppUpdates.IsPresent) {
