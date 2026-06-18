@@ -1,6 +1,6 @@
 # Windows Maintenance Script
 
-This repository contains a PowerShell maintenance script intended for Windows endpoint cleanup, repair, patching, and post-run reporting.
+This repository contains a PowerShell maintenance script intended for Windows endpoint cleanup, repair, patching, and transcript logging.
 
 The current codebase is small:
 
@@ -9,32 +9,30 @@ The current codebase is small:
 
 ## What the Script Does
 
-`Tuneup-Script.ps1` is a multi-stage Windows tune-up script. It is designed to be run with administrator privileges, likely from an RMM context such as NinjaOne, and performs actions that affect the local machine broadly.
+`Tuneup-Script.ps1` is a multi-stage Windows tune-up script. It is designed to be run with administrator privileges and performs actions that affect the local machine broadly.
 
 At a high level, the script:
 
-1. Starts a transcript log under `ProgramData\NinjaRMMAgent`.
-2. Creates or checks for Ninja event logging support.
-3. Checks for `winget`, and attempts attended installation when possible.
-4. Signs out users unless an attended user is specified.
-5. Removes the legacy LabTech agent if it is detected.
-6. Deletes user profile temp files and cache folders defined in an external JSON file.
-7. Clears certificate URL cache entries.
-8. Removes old Windows upgrade folders such as `Windows.old`, `$Windows.~BT`, and `$Windows.~WS`.
-9. Clears Windows temp, prefetch, Windows Error Reporting, Windows Search temp data, CBS logs, and Windows Update cache.
-10. Runs Disk Cleanup using downloaded registry settings and PsExec when unattended.
-11. Performs Dell Command Update handling on Dell systems.
-12. Skips or reports unsupported handling for some Microsoft, Surface, Hyper-V, HP, and other manufacturer cases.
-13. Runs Windows repair and optimization commands such as SFC, `Repair-WindowsImage`, `Repair-Volume`, and `Optimize-Volume`.
-14. Optionally performs an OS component store reset base operation.
-15. Clears DNS, ARP, and Winsock state.
-16. Optionally runs MSIZap to clear orphaned Windows Installer cache data.
-17. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
-18. Uses `winget` to update maintained applications listed in an external JSON file.
-19. Enables and runs Microsoft Defender full scan operations unless skipped.
-20. Removes temporary downloaded assets.
-21. Writes error status back to Ninja custom fields when available.
-22. Reboots automatically after unattended runs.
+1. Starts a transcript log on the system drive.
+2. Checks for `winget`, and attempts attended installation when possible.
+3. Signs out users unless an attended user is specified.
+4. Deletes user profile temp files and cache folders defined in an external JSON file.
+5. Clears certificate URL cache entries.
+6. Removes old Windows upgrade folders such as `Windows.old`, `$Windows.~BT`, and `$Windows.~WS`.
+7. Clears Windows temp, prefetch, Windows Error Reporting, Windows Search temp data, CBS logs, and Windows Update cache.
+8. Runs Disk Cleanup using downloaded registry settings and PsExec when unattended.
+9. Performs Dell Command Update handling on Dell systems.
+10. Skips or reports unsupported handling for some Microsoft, Surface, Hyper-V, HP, and other manufacturer cases.
+11. Runs Windows repair and optimization commands such as SFC, `Repair-WindowsImage`, `Repair-Volume`, and `Optimize-Volume`.
+12. Optionally performs an OS component store reset base operation.
+13. Clears DNS, ARP, and Winsock state.
+14. Optionally runs MSIZap to clear orphaned Windows Installer cache data.
+15. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
+16. Uses `winget` to update maintained applications listed in an external JSON file.
+17. Enables and runs Microsoft Defender full scan operations unless skipped.
+18. Removes temporary downloaded assets.
+19. Prints a final error count and error log to the transcript.
+20. Reboots automatically after unattended runs.
 
 ## Parameters
 
@@ -127,7 +125,6 @@ The script downloads or calls assets from several external locations:
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/PsExec.exe`
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/DellCommandSetup.exe`
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/msizap.exe`
-- `https://s3.amazonaws.com/assets-cp/assets/Agent_Uninstaller.zip`
 - `https://go.microsoft.com/fwlink/?linkid=2088631`
 
 The script assumes these URLs are reachable at runtime and that the downloaded assets are trusted.
@@ -137,15 +134,10 @@ The script assumes these URLs are reachable at runtime and that the downloaded a
 The script starts a PowerShell transcript at:
 
 ```text
-%ProgramData%\NinjaRMMAgent\MaintenanceOutput-<timestamp>.txt
+%SystemDrive%\MaintenanceOutput-<timestamp>.txt
 ```
 
-It tracks an internal `$ErrorCount` and `$ErrorLog`. At the end of the run, it attempts to write these values to Ninja custom fields:
-
-- `MaintenanceErrors`
-- `MaintenanceErrorLog`
-
-If the `Ninja-Property-Set` command is unavailable, the script logs a warning and continues.
+It tracks an internal `$ErrorCount` and `$ErrorLog`. At the end of the run, it prints the final error count and accumulated error text to the transcript output.
 
 ## Important Operational Notes
 
@@ -157,7 +149,6 @@ Before running it on a production endpoint, confirm that:
 - A forced reboot is acceptable.
 - Active users can be signed out.
 - Downloaded third-party and Microsoft utilities are allowed by policy.
-- Ninja custom fields exist if error reporting is expected.
 - Microsoft Defender actions will not conflict with the endpoint's security stack.
 - Resetting the OS component store is acceptable, because it can remove the ability to uninstall superseded updates.
 
@@ -168,10 +159,12 @@ These notes describe the code as it currently stands, not planned behavior.
 - The repository does not currently include tests, CI configuration, or a module structure.
 - The script is one large procedural file with two helper functions: `Install-WinGet` and `WingetPatching`.
 - The script depends on external asset files that are not versioned in this repository.
+- The script numbering currently jumps from Step 1 to Step 3; there is no Step 2 block in the current file.
 - `-SkipAppUpdates` is referenced in Step 13 but is not declared as a script parameter.
 - There are several hard-coded root-drive paths such as `C:\PsExec.exe`, `C:\msizap.exe`, and QuickBooks cleanup paths under `C:\ProgramData`.
-- Some commands appear to contain typos or questionable paths, such as `Write-Ouput`, `-acceptuela`, and a cleanup path string containing `TuneUpReg.reg -Force`.
-- The LabTech archive extraction uses single-quoted strings containing `$Env:SystemDrive`, so those paths will not expand in that call.
+- Some commands appear to contain typos or questionable paths, such as `Write-Ouput`, `-acceptuela`, `$EnvSystemDrive`, and a cleanup path string containing `TuneUpReg.reg -Force`.
+- The Home SKU branch still contains an incomplete-looking `Write-EventLog Applications` call.
+- The error path appends `$logTimestamp` before assigning it, while the no-error path assigns it first.
 - HP Image Assistant support is currently commented out and explicitly skipped.
 - Surface firmware and driver update handling is informational only.
 
