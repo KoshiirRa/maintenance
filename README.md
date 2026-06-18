@@ -159,12 +159,8 @@ These notes describe the code as it currently stands, not planned behavior.
 - The repository does not currently include tests, CI configuration, or a module structure.
 - The script is one large procedural file with two helper functions: `Install-WinGet` and `WingetPatching`.
 - The script depends on external asset files that are not versioned in this repository.
-- The script numbering currently jumps from Step 1 to Step 3; there is no Step 2 block in the current file.
-- `-SkipAppUpdates` is referenced in Step 13 but is not declared as a script parameter.
-- There are several hard-coded root-drive paths such as `C:\PsExec.exe`, `C:\msizap.exe`, and QuickBooks cleanup paths under `C:\ProgramData`.
-- Some commands appear to contain typos or questionable paths, such as `Write-Ouput`, `-acceptuela`, `$EnvSystemDrive`, and a cleanup path string containing `TuneUpReg.reg -Force`.
-- The Home SKU branch still contains an incomplete-looking `Write-EventLog Applications` call.
-- The error path appends `$logTimestamp` before assigning it, while the no-error path assigns it first.
+- The numbered maintenance sections currently run from Step 0 through Step 14.
+- Application updates always run when the OS version check and `winget` handling allow it; there is no declared skip flag for that stage.
 - HP Image Assistant support is currently commented out and explicitly skipped.
 - Surface firmware and driver update handling is informational only.
 
