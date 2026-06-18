@@ -119,9 +119,9 @@ The script downloads or calls assets from several external locations:
 
 - `https://api.github.com/repos/microsoft/winget-cli/releases`
 - `https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx`
-- `https://github.com/NetlinkSolutions/Script-Assets/raw/main/MaintainedPrograms.json`
-- `https://raw.githubusercontent.com/NetlinkSolutions/Script-Assets/main/UserTempFileLocations.json`
-- `https://raw.githubusercontent.com/NetlinkSolutions/Script-Assets/main/TuneUpReg.reg`
+- `https://raw.githubusercontent.com/KoshiirRa/script-assets/main/MaintainedPrograms.json`
+- `https://raw.githubusercontent.com/KoshiirRa/script-assets/main/UserTempFileLocations.json`
+- `https://raw.githubusercontent.com/KoshiirRa/script-assets/main/TuneUpReg.reg`
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/PsExec.exe`
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/DellCommandSetup.exe`
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/msizap.exe`

@@ -112,7 +112,7 @@ Function Install-WinGet {
 
 Function WingetPatching {
     Write-Output "Winget available :)"
-        Invoke-WebRequest -Uri https://github.com/NetlinkSolutions/Script-Assets/raw/main/MaintainedPrograms.json -OutFile "$Env:SystemDrive\MaintainedPrograms.json"
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/KoshiirRa/script-assets/main/MaintainedPrograms.json -OutFile "$Env:SystemDrive\MaintainedPrograms.json"
         $maintainedPrograms = Get-Content "$Env:SystemDrive\MaintainedPrograms.json" | Out-String | ConvertFrom-Json
         foreach ($program in $maintainedPrograms) {
             $name = $program.Name
@@ -196,7 +196,7 @@ if ($HomeSKU -eq $TRUE) {
 foreach ($user in Get-Childitem "$Env:SystemDrive\Users") {
     Write-Output "Cleaning up $user..."
     $Path = "$Env:SystemDrive\Users\$user"
-    Invoke-WebRequest -Uri https://raw.githubusercontent.com/NetlinkSolutions/Script-Assets/main/UserTempFileLocations.json -OutFile "$Env:SystemDrive\UserTempFileLocations.json"
+    Invoke-WebRequest -Uri https://raw.githubusercontent.com/KoshiirRa/script-assets/main/UserTempFileLocations.json -OutFile "$Env:SystemDrive\UserTempFileLocations.json"
     $paths = Get-Content "$Env:SystemDrive\UserTempFileLocations.json" | Out-String | ConvertFrom-Json
     foreach ($tempPath in $paths) {
         $removePath = $tempPath.Path
@@ -282,7 +282,7 @@ Start-Service -Name wuauserv
 Start-Service -Name CryptSvc
 ### Do Disk Cleanup
 Write-Output "Running Disk Cleanup..."
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/NetlinkSolutions/Script-Assets/main/TuneUpReg.reg -OutFile "$Env:SystemDrive\TuneUpReg.reg" #go grab the registry file to save space in the script...
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/KoshiirRa/script-assets/main/TuneUpReg.reg -OutFile "$Env:SystemDrive\TuneUpReg.reg" #go grab the registry file to save space in the script...
 Invoke-Command {reg import "$Env:SystemDrive\TuneUpReg.reg"} -ErrorAction SilentlyContinue #Far, far saner to import registry files using this than with powershell
 try {
     if ([string]::IsNullOrEmpty($AttendedRun)) {
