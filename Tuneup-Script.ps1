@@ -31,7 +31,7 @@
 #
 #PARAMETERS
 #-AttendedRun: feed it the username and it will skip that user
-#-NoMSIZap: switch flag, if set it will skip MSI Zap cleanup
+#-NoMSIZap: switch flag, if set it will skip Windows Installer cache quarantine
 #-NoRebase: switch flag, if set it will skip OS Rebase
 #-SkipDefender: switch flag, if set it will skip defender run (also set internally further down if it detects that defender is off and cannot be turned on)
 
@@ -42,7 +42,7 @@ param (
     [Parameter()][Switch]$SkipDefender,
     # Do I need to skip OS Rebasing?
     [Parameter()][Switch]$NoRebase,
-    # Do I need to skip MSI Zap?
+    # Do I need to skip Windows Installer cache quarantine?
     [Parameter()][Switch]$NoMSIZap
 )
 
@@ -119,6 +119,121 @@ Function WingetPatching {
             Write-Output "Updating $name if it is installed..."
             winget upgrade $program.Id --accept-package-agreements --accept-source-agreements -h
         }
+}
+
+Function Install-PsExec {
+    $tempPath = "C:\Temp"
+    $psToolsZip = Join-Path -Path $tempPath -ChildPath "PSTools.zip"
+    $psToolsExtractPath = Join-Path -Path $tempPath -ChildPath "PSTools"
+    $psExecSource = Join-Path -Path $psToolsExtractPath -ChildPath "PsExec.exe"
+    $psExecDestination = Join-Path -Path $Env:SystemDrive -ChildPath "PsExec.exe"
+
+    New-Item -Path $tempPath -ItemType Directory -Force | Out-Null
+    Remove-Item -Path $psToolsExtractPath -Force -Recurse -ErrorAction SilentlyContinue
+
+    Write-Output "Downloading PsTools from Microsoft Sysinternals..."
+    Invoke-WebRequest -Uri https://download.sysinternals.com/files/PSTools.zip -OutFile $psToolsZip
+
+    Write-Output "Extracting PsExec from PsTools..."
+    Expand-Archive -Path $psToolsZip -DestinationPath $psToolsExtractPath -Force
+    Copy-Item -Path $psExecSource -Destination $psExecDestination -Force
+}
+
+Function Compress-OrphanedInstallerCache {
+    $installerCachePath = Join-Path -Path $Env:SystemRoot -ChildPath "Installer"
+    $quarantineBasePath = "C:\Temp\InstallerCacheQuarantine"
+    $timestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
+    $stagingPath = Join-Path -Path $quarantineBasePath -ChildPath $timestamp
+    $stagedFilesPath = Join-Path -Path $stagingPath -ChildPath "Files"
+    $manifestPath = Join-Path -Path $stagingPath -ChildPath "manifest.csv"
+    $archivePath = Join-Path -Path $quarantineBasePath -ChildPath "OrphanedInstallerCache-$timestamp.zip"
+    $referencedInstallerFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    if (-not (Test-Path -Path $installerCachePath)) {
+        Write-Output "Windows Installer cache path not found, skipping orphaned installer cache cleanup..."
+        return
+    }
+
+    Write-Output "Auditing Windows Installer cache references..."
+    $installerRegistryRoots = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Installer\UserData"
+    )
+
+    foreach ($registryRoot in $installerRegistryRoots) {
+        if (-not (Test-Path -Path $registryRoot)) {
+            continue
+        }
+
+        Get-ChildItem -Path $registryRoot -Recurse -ErrorAction SilentlyContinue |
+            Get-ItemProperty -Name LocalPackage -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                if (-not [string]::IsNullOrWhiteSpace($_.LocalPackage)) {
+                    try {
+                        $fullPath = [System.IO.Path]::GetFullPath($_.LocalPackage)
+                        $referencedInstallerFiles.Add($fullPath) | Out-Null
+                    } catch {
+                        Write-Output "Unable to normalize installer reference $($_.LocalPackage)"
+                    }
+                }
+            }
+    }
+
+    $installerCacheFiles = Get-ChildItem -Path (Join-Path -Path $installerCachePath -ChildPath "*") -File -Include "*.msi", "*.msp" -ErrorAction SilentlyContinue
+    $orphanedInstallerFiles = $installerCacheFiles | Where-Object {
+        -not $referencedInstallerFiles.Contains($_.FullName)
+    }
+
+    if (-not $orphanedInstallerFiles) {
+        Write-Output "No orphaned Windows Installer cache files found."
+        return
+    }
+
+    Write-Output "Found $($orphanedInstallerFiles.Count) orphaned Windows Installer cache candidate(s)."
+    New-Item -Path $stagedFilesPath -ItemType Directory -Force | Out-Null
+
+    $quarantinedFiles = @()
+    $manifest = foreach ($file in $orphanedInstallerFiles) {
+        try {
+            $hash = Get-FileHash -Path $file.FullName -Algorithm SHA256 -ErrorAction Stop
+            Copy-Item -Path $file.FullName -Destination (Join-Path -Path $stagedFilesPath -ChildPath $file.Name) -Force -ErrorAction Stop
+            $quarantinedFiles += $file
+
+            [PSCustomObject]@{
+                OriginalPath = $file.FullName
+                FileName = $file.Name
+                Length = $file.Length
+                LastWriteTimeUtc = $file.LastWriteTimeUtc.ToString("o")
+                SHA256 = $hash.Hash
+                Reason = "Not referenced by registered Windows Installer LocalPackage data"
+            }
+        } catch {
+            Write-Output "WARNING ---------- Failed to stage installer cache candidate $($file.FullName)"
+        }
+    }
+
+    if (-not $quarantinedFiles) {
+        Write-Output "No orphaned Windows Installer cache candidates could be staged for quarantine."
+        Remove-Item -Path $stagingPath -Force -Recurse -ErrorAction SilentlyContinue
+        return
+    }
+
+    $manifest | Export-Csv -Path $manifestPath -NoTypeInformation
+
+    Write-Output "Compressing orphaned installer cache candidates to $archivePath..."
+    Compress-Archive -Path (Join-Path -Path $stagingPath -ChildPath "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+
+    if (Test-Path -Path $archivePath) {
+        foreach ($file in $quarantinedFiles) {
+            Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item -Path $stagingPath -Force -Recurse -ErrorAction SilentlyContinue
+        Write-Output "Archived and removed orphaned installer cache candidates. Archive retained at $archivePath"
+    } else {
+        Write-Output "WARNING ---------- Failed to create installer cache quarantine archive; original files were not removed."
+        $script:ErrorCount += 1
+        $script:ErrorLog += "Failed to create installer cache quarantine archive.  "
+    }
 }
 
 #Step 0 - Initialize some stuff.
@@ -286,7 +401,7 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/KoshiirRa/script-assets
 Invoke-Command {reg import "$Env:SystemDrive\TuneUpReg.reg"} -ErrorAction SilentlyContinue #Far, far saner to import registry files using this than with powershell
 try {
     if ([string]::IsNullOrEmpty($AttendedRun)) {
-        Invoke-WebRequest -Uri https://github.com/NetlinkSolutions/Script-Assets/raw/main/PsExec.exe -OutFile "$Env:SystemDrive\PsExec.exe" #go grab psexec so we can run disc cleanup silently in the background / without active login session
+        Install-PsExec #go grab psexec so we can run disc cleanup silently in the background / without active login session
         Invoke-Command {& "$Env:SystemDrive\PsExec.exe" -accepteula -s "cleanmgr" /sagerun:100} 
     } else {
         Invoke-Expression {"cleanmgr /sagerun:100"}
@@ -302,7 +417,7 @@ Write-Output "Is this a Dell?"
 $PCInfo = Get-CimInstance -ClassName Win32_ComputerSystem
 if ($PCInfo.Manufacturer.Contains("Dell")) {
     Write-Output "Yes!  Checking for Dell Command Update..."
-    Invoke-WebRequest -Uri https://github.com/NetlinkSolutions/Script-Assets/raw/main/PsExec.exe -OutFile "$Env:SystemDrive\PsExec.exe"
+    Install-PsExec
     if (Test-Path -Path "$Env:ProgramFiles\Dell\CommandUpdate\dcu-cli.exe") {
         Write-Output "Found Dell Command Update!"
         Write-Output "Scanning for updates via Dell Command CLI..."
@@ -469,20 +584,18 @@ try {
     Write-Output "WARNING ------- Something went wrong with cleaning up the DNS and ARP caches..."
 }
 
-#STEP 10 - MSIZap
-#This cleans up orphaned cached Windows Installer data files.  MSIZap isn't part of Windows even though its a Microsoft-made tool, so gotta grab it from the assets repo and clean it up later because its supposed to be a 'do not redistribute' tool.
+#STEP 10 - Windows Installer Cache Quarantine
+#This audits Windows Installer cache files and quarantines orphaned candidates into a compressed archive instead of using MSIZap.
 if ($NoMSIZap.IsPresent) {
-    Write-Output "Skipping MSIZap per your request..."
+    Write-Output "Skipping Windows Installer cache quarantine per your request..."
 } else 
 {
-    Write-Output "Clearing orphaned Windows Installer data files..."
-    Invoke-WebRequest -Uri https://github.com/NetlinkSolutions/Script-Assets/raw/main/msizap.exe -OutFile "$Env:SystemDrive\msizap.exe"; 
     try {
-        Invoke-Command {& "$Env:SystemDrive\msizap.exe" g}
+        Compress-OrphanedInstallerCache
     } catch {
         $ErrorCount += 1
-        $ErrorLog += "Something went wrong with MSIZap Cleanup.  "
-        Write-Output "WARNING ---------- Something went wrong with MSIZap Cleanup"
+        $ErrorLog += "Something went wrong with Windows Installer cache quarantine.  "
+        Write-Output "WARNING ---------- Something went wrong with Windows Installer cache quarantine"
     }
 }
 
@@ -554,7 +667,8 @@ if ($SkipDefender.IsPresent -or $SkipDefender -eq "TRUE") {
 
 #STEP 14 - Clean up after ourselves and do a reboot
 Remove-Item -Path "$Env:SystemDrive\PsExec.exe" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "$Env:SystemDrive\msizap.exe" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "C:\Temp\PSTools.zip" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "C:\Temp\PSTools" -Force -Recurse -ErrorAction SilentlyContinue
 Remove-Item -Path "$Env:SystemDrive\DellCommandSetup.exe" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$Env:SystemDrive\TuneUpReg.reg" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$Env:SystemDrive\MaintainedPrograms.json" -Force -ErrorAction SilentlyContinue

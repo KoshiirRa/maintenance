@@ -26,7 +26,7 @@ At a high level, the script:
 11. Runs Windows repair and optimization commands such as SFC, `Repair-WindowsImage`, `Repair-Volume`, and `Optimize-Volume`.
 12. Optionally performs an OS component store reset base operation.
 13. Clears DNS, ARP, and Winsock state.
-14. Optionally runs MSIZap to clear orphaned Windows Installer cache data.
+14. Optionally quarantines orphaned Windows Installer cache candidates into a compressed archive.
 15. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
 16. Uses `winget` to update maintained applications listed in an external JSON file.
 17. Enables and runs Microsoft Defender full scan operations unless skipped.
@@ -81,7 +81,7 @@ Example:
 
 ### `-NoMSIZap`
 
-Skips MSIZap cleanup of orphaned Windows Installer cached data.
+Skips the Windows Installer cache quarantine stage. This switch name is retained for compatibility with older script usage.
 
 Example:
 
@@ -122,9 +122,8 @@ The script downloads or calls assets from several external locations:
 - `https://raw.githubusercontent.com/KoshiirRa/script-assets/main/MaintainedPrograms.json`
 - `https://raw.githubusercontent.com/KoshiirRa/script-assets/main/UserTempFileLocations.json`
 - `https://raw.githubusercontent.com/KoshiirRa/script-assets/main/TuneUpReg.reg`
-- `https://github.com/NetlinkSolutions/Script-Assets/raw/main/PsExec.exe`
+- `https://download.sysinternals.com/files/PSTools.zip`
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/DellCommandSetup.exe`
-- `https://github.com/NetlinkSolutions/Script-Assets/raw/main/msizap.exe`
 - `https://go.microsoft.com/fwlink/?linkid=2088631`
 
 The script assumes these URLs are reachable at runtime and that the downloaded assets are trusted.
@@ -161,6 +160,7 @@ These notes describe the code as it currently stands, not planned behavior.
 - The script depends on external asset files that are not versioned in this repository.
 - The numbered maintenance sections currently run from Step 0 through Step 14.
 - Application updates always run when the OS version check and `winget` handling allow it; there is no declared skip flag for that stage.
+- Step 10 replaces the older MSIZap approach with a conservative Windows Installer cache quarantine archive under `C:\Temp\InstallerCacheQuarantine`.
 - HP Image Assistant support is currently commented out and explicitly skipped.
 - Surface firmware and driver update handling is informational only.
 
