@@ -32,7 +32,8 @@ At a high level, the script:
 17. Enables and runs Microsoft Defender full scan operations unless skipped.
 18. Removes temporary downloaded assets.
 19. Prints a final error count and error log to the transcript.
-20. Reboots automatically after unattended runs.
+20. Logs ending system-drive free space and net free-space change.
+21. Reboots automatically after unattended runs.
 
 ## Parameters
 
@@ -137,6 +138,8 @@ The script starts a PowerShell transcript at:
 ```
 
 It tracks an internal `$ErrorCount` and `$ErrorLog`. At the end of the run, it prints the final error count and accumulated error text to the transcript output.
+
+The transcript also records system-drive free space at the beginning and end of the run, plus the net free-space change in GB and bytes.
 
 ## Important Operational Notes
 

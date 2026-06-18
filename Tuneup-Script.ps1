@@ -121,6 +121,26 @@ Function WingetPatching {
         }
 }
 
+Function Get-SystemDriveFreeSpace {
+    $driveLetter = $Env:SystemDrive.Trim(":")
+    $drive = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$Env:SystemDrive'"
+
+    [PSCustomObject]@{
+        DriveLetter = $driveLetter
+        FreeBytes = [Int64]$drive.FreeSpace
+        FreeGB = [math]::Round(($drive.FreeSpace / 1GB), 2)
+    }
+}
+
+Function Write-SystemDriveFreeSpaceMetric {
+    Param(
+        [Parameter(Mandatory)][String]$Label,
+        [Parameter(Mandatory)][Object]$Metric
+    )
+
+    Write-Output "SYSTEM DRIVE FREE SPACE ($Label): $($Metric.FreeGB) GB ($($Metric.FreeBytes) bytes)"
+}
+
 Function Install-PsExec {
     $tempPath = "C:\Temp"
     $psToolsZip = Join-Path -Path $tempPath -ChildPath "PSTools.zip"
@@ -239,6 +259,8 @@ Function Compress-OrphanedInstallerCache {
 #Step 0 - Initialize some stuff.
 $timestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
 Start-Transcript -Path "$Env:SystemDrive\MaintenanceOutput-$timestamp.txt"
+$StartingSystemDriveFreeSpace = Get-SystemDriveFreeSpace
+Write-SystemDriveFreeSpaceMetric -Label "START" -Metric $StartingSystemDriveFreeSpace
 $ErrorCount = 0 #0 = no, >0 = yes
 $ErrorLog = ""
 $HomeSKU = $false
@@ -685,6 +707,11 @@ if ($ErrorCount -gt 0) {
     $logTimestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
     $ErrorLog += "  TIMESTAMP: $logTimestamp"
 }
+$EndingSystemDriveFreeSpace = Get-SystemDriveFreeSpace
+Write-SystemDriveFreeSpaceMetric -Label "END" -Metric $EndingSystemDriveFreeSpace
+$FreedSystemDriveBytes = $EndingSystemDriveFreeSpace.FreeBytes - $StartingSystemDriveFreeSpace.FreeBytes
+$FreedSystemDriveGB = [math]::Round(($FreedSystemDriveBytes / 1GB), 2)
+Write-Output "SYSTEM DRIVE FREE SPACE CHANGE: $FreedSystemDriveGB GB ($FreedSystemDriveBytes bytes)"
 if ([string]::IsNullOrEmpty($AttendedRun)) {
     Write-Output "Rebooting..."
     Stop-Transcript
