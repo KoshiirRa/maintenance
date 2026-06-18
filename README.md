@@ -1,0 +1,180 @@
+# Windows Maintenance Script
+
+This repository contains a PowerShell maintenance script intended for Windows endpoint cleanup, repair, patching, and post-run reporting.
+
+The current codebase is small:
+
+- `Tuneup-Script.ps1` - the main maintenance script.
+- `LICENSE` - MIT license.
+
+## What the Script Does
+
+`Tuneup-Script.ps1` is a multi-stage Windows tune-up script. It is designed to be run with administrator privileges, likely from an RMM context such as NinjaOne, and performs actions that affect the local machine broadly.
+
+At a high level, the script:
+
+1. Starts a transcript log under `ProgramData\NinjaRMMAgent`.
+2. Creates or checks for Ninja event logging support.
+3. Checks for `winget`, and attempts attended installation when possible.
+4. Signs out users unless an attended user is specified.
+5. Removes the legacy LabTech agent if it is detected.
+6. Deletes user profile temp files and cache folders defined in an external JSON file.
+7. Clears certificate URL cache entries.
+8. Removes old Windows upgrade folders such as `Windows.old`, `$Windows.~BT`, and `$Windows.~WS`.
+9. Clears Windows temp, prefetch, Windows Error Reporting, Windows Search temp data, CBS logs, and Windows Update cache.
+10. Runs Disk Cleanup using downloaded registry settings and PsExec when unattended.
+11. Performs Dell Command Update handling on Dell systems.
+12. Skips or reports unsupported handling for some Microsoft, Surface, Hyper-V, HP, and other manufacturer cases.
+13. Runs Windows repair and optimization commands such as SFC, `Repair-WindowsImage`, `Repair-Volume`, and `Optimize-Volume`.
+14. Optionally performs an OS component store reset base operation.
+15. Clears DNS, ARP, and Winsock state.
+16. Optionally runs MSIZap to clear orphaned Windows Installer cache data.
+17. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
+18. Uses `winget` to update maintained applications listed in an external JSON file.
+19. Enables and runs Microsoft Defender full scan operations unless skipped.
+20. Removes temporary downloaded assets.
+21. Writes error status back to Ninja custom fields when available.
+22. Reboots automatically after unattended runs.
+
+## Parameters
+
+The script currently defines these parameters:
+
+```powershell
+.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-NoRebase] [-NoMSIZap]
+```
+
+### `-AttendedRun <username>`
+
+Marks the run as attended and passes the username that should remain signed in.
+
+When this is supplied:
+
+- The matching user is skipped during sign-out.
+- Disk Cleanup runs visibly in the active user context.
+- The script does not automatically reboot at the end.
+- `winget` installation can be attempted in the logged-in user context if `winget` is missing.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -AttendedRun "jdoe"
+```
+
+### `-SkipDefender`
+
+Skips the Microsoft Defender update, full scan, and threat removal stage.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -SkipDefender
+```
+
+### `-NoRebase`
+
+Skips the OS component store reset base stage. This preserves the ability to uninstall superseded Windows updates.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -NoRebase
+```
+
+### `-NoMSIZap`
+
+Skips MSIZap cleanup of orphaned Windows Installer cached data.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -NoMSIZap
+```
+
+## Running the Script
+
+Run from an elevated Windows PowerShell session:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+.\Tuneup-Script.ps1
+```
+
+For an attended local run:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+.\Tuneup-Script.ps1 -AttendedRun "username"
+```
+
+The unattended path ends with:
+
+```powershell
+Restart-Computer -Force
+```
+
+Do not start an unattended run unless an immediate forced reboot is acceptable.
+
+## External Assets and Services
+
+The script downloads or calls assets from several external locations:
+
+- `https://api.github.com/repos/microsoft/winget-cli/releases`
+- `https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx`
+- `https://github.com/NetlinkSolutions/Script-Assets/raw/main/MaintainedPrograms.json`
+- `https://raw.githubusercontent.com/NetlinkSolutions/Script-Assets/main/UserTempFileLocations.json`
+- `https://raw.githubusercontent.com/NetlinkSolutions/Script-Assets/main/TuneUpReg.reg`
+- `https://github.com/NetlinkSolutions/Script-Assets/raw/main/PsExec.exe`
+- `https://github.com/NetlinkSolutions/Script-Assets/raw/main/DellCommandSetup.exe`
+- `https://github.com/NetlinkSolutions/Script-Assets/raw/main/msizap.exe`
+- `https://s3.amazonaws.com/assets-cp/assets/Agent_Uninstaller.zip`
+- `https://go.microsoft.com/fwlink/?linkid=2088631`
+
+The script assumes these URLs are reachable at runtime and that the downloaded assets are trusted.
+
+## Logging and Reporting
+
+The script starts a PowerShell transcript at:
+
+```text
+%ProgramData%\NinjaRMMAgent\MaintenanceOutput-<timestamp>.txt
+```
+
+It tracks an internal `$ErrorCount` and `$ErrorLog`. At the end of the run, it attempts to write these values to Ninja custom fields:
+
+- `MaintenanceErrors`
+- `MaintenanceErrorLog`
+
+If the `Ninja-Property-Set` command is unavailable, the script logs a warning and continues.
+
+## Important Operational Notes
+
+This script is intentionally invasive. It deletes files, resets Windows Update state, changes Defender policy values, runs repair tools, runs vendor update tooling, and may forcibly restart the computer.
+
+Before running it on a production endpoint, confirm that:
+
+- The endpoint has a current backup or restore path.
+- A forced reboot is acceptable.
+- Active users can be signed out.
+- Downloaded third-party and Microsoft utilities are allowed by policy.
+- Ninja custom fields exist if error reporting is expected.
+- Microsoft Defender actions will not conflict with the endpoint's security stack.
+- Resetting the OS component store is acceptable, because it can remove the ability to uninstall superseded updates.
+
+## Current Implementation Notes
+
+These notes describe the code as it currently stands, not planned behavior.
+
+- The repository does not currently include tests, CI configuration, or a module structure.
+- The script is one large procedural file with two helper functions: `Install-WinGet` and `WingetPatching`.
+- The script depends on external asset files that are not versioned in this repository.
+- `-SkipAppUpdates` is referenced in Step 13 but is not declared as a script parameter.
+- There are several hard-coded root-drive paths such as `C:\PsExec.exe`, `C:\msizap.exe`, and QuickBooks cleanup paths under `C:\ProgramData`.
+- Some commands appear to contain typos or questionable paths, such as `Write-Ouput`, `-acceptuela`, and a cleanup path string containing `TuneUpReg.reg -Force`.
+- The LabTech archive extraction uses single-quoted strings containing `$Env:SystemDrive`, so those paths will not expand in that call.
+- HP Image Assistant support is currently commented out and explicitly skipped.
+- Surface firmware and driver update handling is informational only.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE`.
