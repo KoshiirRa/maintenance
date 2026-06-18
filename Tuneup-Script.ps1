@@ -25,9 +25,6 @@
 #
 #FUTURE PLANS
 #-Holy crap wipe out the System32\Spool\Printers folder
-#-Ninja Task support to reboot partway through
-#--use ninja event id monitoring to do this.
-#--Write-EventLog Applications -Source Ninja -eventID $Numbers -Message "Hey go do a thing"
 #--65534 = 
 #--65533 = 
 #-find a way to strip out the old Dell Command Update
@@ -126,17 +123,11 @@ Function WingetPatching {
 
 #Step 0 - Initialize some stuff.
 $timestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
-Start-Transcript -Path "$Env:ProgramData\NinjaRMMAgent\MaintenanceOutput-$timestamp.txt"
+Start-Transcript -Path "$Env:SystemDrive\MaintenanceOutput-$timestamp.txt"
 $ErrorCount = 0 #0 = no, >0 = yes
 $ErrorLog = ""
 $HomeSKU = $false
 $SystemDriveLetter = $Env:SystemDrive.Trim(":")
-if([System.Diagnostics.EventLog]::Exists('Ninja')) {
-    Write-Output "Ninja Log exists already"
-} else{
-    Write-Output "Ninja Log does not exist, creating..."
-    New-EventLog -LogName "Ninja Scripts" -Source "Ninja"
-}
 try {
     winget
 } catch {
@@ -193,30 +184,9 @@ if ($edition.Edition -notcontains "Home") {
     $ErrorCount += 1
     $ErrorLog += "Home SKU - WARNING - cannot log out users.  "
     $HomeSKU = $true
-    #Maybe in the future use a Ninja task to reboot the PC and then run the script again with a flag.
+    #Maybe in the future reboot the PC and then run the script again with a flag.
     #DEV AREA
     Write-EventLog Applications 
-}
-
-#Step 2 - Check if Labtech still exists on the PC because why not.  If it does, uninstall it.
-Write-Output "Checking if Labtech Service still exists..."
-if (Test-Path -Path "$Env:SystemDrive\Windows\Ltsvc\LTSvcMon.exe") {
-    Write-Output "Labtech Service exists, uninstall" 
-    $url = "https://s3.amazonaws.com/assets-cp/assets/Agent_Uninstaller.zip"
-    $output = "$Env:SystemDrive\Windows\Temp\Agent_Uninstaller.zip"
-    (New-Object System.Net.WebClient).DownloadFile($url, $output)
-    # The below usage of Expand-Archive is only possible with PowerShell 5.0+
-    # Expand-Archive -LiteralPath C:\Windows\Temp\Agent_Uninstaller.zip -DestinationPath C:\Windows\Temp\LTAgentUninstaller -Force
-    # Use .NET instead
-    [System.Reflection.Assembly]::LoadWithPartialName("System.IO.Compression.FileSystem") | Out-Null
-    # Now we can expand the archive
-    [System.IO.Compression.ZipFile]::ExtractToDirectory('$Env:SystemDrive\Windows\Temp\Agent_Uninstaller.zip', '$Env:SystemDrive\Windows\Temp\LTAgentUninstaller')
-    Start-Process -FilePath "$Env:SystemDrive\Windows\Temp\LTAgentUninstaller\Agent_Uninstall.exe"
-    Write-Output "Labtech uninstaller started..."
-    $ErrorCount += 1
-    $ErrorLog += "Found Labtech, please confirm that uninstaller worked!  "
-} else {
-    Write-Output "Labtech Service not found, proceeding..."
 }
 
 #Step 3 - Clean up temp files, caches, Java stuff, etc in all user profiles
@@ -595,27 +565,13 @@ Remove-Item -Path "$Env:SystemDrive\UserTempFileLocations.json" -Force -ErrorAct
 Remove-Item -Path "$Env:SystemDrive\Net48.exe" -Force -ErrorAction SilentlyContinue
 if ($ErrorCount -gt 0) {
     Write-Output "I HAD $ErrorCount ERRORS!"
-    Write-Output "FINAL ERROR LOG FOR NINJA FOLLOWS:"
+    Write-Output "FINAL ERROR LOG FOLLOWS:"
     Write-Output $ErrorLog
-    Write-Output "WRITING ERROR DATA TO NINJA..."
-    $logTimestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
     $ErrorLog += "  TIMESTAMP: $logTimestamp"
-    try {
-        Ninja-Property-Set -Name "MaintenanceErrors" $ErrorCount
-        Ninja-Property-Set -Name "MaintenanceErrorLog" $ErrorLog
-    } catch {
-        Write-Output "WARNING: CANNOT WRITE DATA TO NINJA."
-    }
 } else {
     Write-Output "I HAD NO ERRORS :D"
     $logTimestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
     $ErrorLog += "  TIMESTAMP: $logTimestamp"
-    try {
-        Ninja-Property-Set -Name "MaintenanceErrors" $ErrorCount
-        Ninja-Property-Set -Name "MaintenanceErrorLog" $ErrorLog
-    } catch {
-        Write-Output "WARNING: CANNOT WRITE DATA TO NINJA."
-    }
 }
 if ([string]::IsNullOrEmpty($AttendedRun)) {
     Write-Output "Rebooting..."
