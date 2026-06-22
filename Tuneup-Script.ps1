@@ -1,5 +1,5 @@
 #Author: Marty Marks
-#Revision: 2.1
+#Revision: 2.3
 #
 #History:
 #1 - initial commit
@@ -20,6 +20,8 @@
 #1.12 - enhanced winget script block, yay functions
 #2.0 - forking from original script
 #2.1 - added two lines to application cleanup to deal with the fact that Intuit never cleans up after itself.
+#2.2 - Had Codex add some improvements.
+#2.3 - merge back in stuff I forgot to push from the work machine.  suppress errors on Intuit cleanup, expand QB cache cleanup, add logic to see if github is accessible.
 #
 #Description: Okay so this is a horrible, horrible idea, but I'm going to try and consolidate my 4-batch-file-plus-1-powershell-script tuneup process we had on Automate into a single powershell script.  Yes, I'm crazy.  Yes, this file is going to be full of a lot of bastardized code for a while.
 #
@@ -257,6 +259,17 @@ Function Compress-OrphanedInstallerCache {
 }
 
 #Step 0 - Initialize some stuff.
+try {
+    Invoke-WebRequest -uri https://github.com -UseBasicParsing
+} catch {
+    Write-Output "No github access!  Checking for json, reg files..."
+    if ((Test-Path -Path $Env:SystemDrive\UserTempFileLocations.json) -and (Test-Path -Path $Env:SystemDrive\TuneUpReg.reg)) {
+        Write-Output "Files found!  Continuing..."
+    } else {
+        Write-Output "Files not found!"
+        throw "NO GITHUB ACCESS.  DOWNLOAD JSON AND REG FILES MANUALLY AND PLACE IN THE ROOT OF THE SYSTEM DRIVE" 
+    }
+}
 $timestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
 Start-Transcript -Path "$Env:SystemDrive\MaintenanceOutput-$timestamp.txt"
 $StartingSystemDriveFreeSpace = Get-SystemDriveFreeSpace
@@ -624,7 +637,8 @@ if ($NoMSIZap.IsPresent) {
 #STEP 11 - Application-Specific Cleanup
 #I'M LOOKING AT YOU, TEAMS AND ADOBE!
 Write-Output "Cleaning up Microsoft Teams cache..."
-Get-ChildItem "$Env:SystemDrive\Users\*\AppData\Roaming\Microsoft\Teams\*" -directory | Where name -in ('application cache','blob storage','databases','GPUcache','IndexedDB','Local Storage','tmp') | ForEach {Remove-Item $_.FullName -Recurse -Force}
+Get-ChildItem "$Env:SystemDrive\Users\*\AppData\Roaming\Microsoft\Teams\*" -directory | Where name -in ('service worker','application cache','blob storage','databases','GPUcache','IndexedDB','Local Storage','tmp') | ForEach {Remove-Item $_.FullName -Recurse -Force}
+
 Write-Output "---------------------------------"
 if (Test-Path -Path "$Env:ProgramData\Adobe") {
     Write-Output "Cleaning up Adobe's mess..."
@@ -634,8 +648,10 @@ if (Test-Path -Path "$Env:ProgramData\Adobe") {
 }
 Get-ChildItem "$Env:SystemDrive\Users\*\AppData\Local\Microsoft.AAD.BrokerPlugin_cw5n1h2txyewy\*" -directory | ForEach {Remove-Item $_.FullName -Recurse -Force}
 Write-Output "Cleaning up QuickBooks cache..."
-Get-ChildItem "$Env:ProgramData\Intuit\QuickBooks 20*\Components\DownloadQB*\SPatch*.dat" -Force | Remove-Item -Recurse -Force
-Get-ChildItem "$Env:ProgramData\Intuit\QuickBooks 20*\Components\QBUpdateCache" -Force | Remove-Item -Recurse -Force
+Get-ChildItem "C:\ProgramData\Intuit\QuickBooks 20*\Components\DownloadQB*\SPatch*.dat" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem "C:\ProgramData\Intuit\QuickBooks 20*\Components\QBUpdateCache" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem "C:\ProgramData\Intuit\Quickbooks Enterprise Solutions*\Components\DownloadQB*" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem "C:\ProgramData\Intuit\Quickbooks Enterprise Solutions*\Components\QBUpdateCache*" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 #STEP 12 - Use Winget to upgrade specific applications
 Write-Output "Checking to see if we can use winget to do program updates..."
