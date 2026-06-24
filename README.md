@@ -26,7 +26,7 @@ At a high level, the script:
 11. Runs Windows repair and optimization commands such as SFC, `Repair-WindowsImage`, `Repair-Volume`, and `Optimize-Volume`.
 12. Optionally performs an OS component store reset base operation.
 13. Clears DNS, ARP, and Winsock state.
-14. Optionally quarantines orphaned Windows Installer cache candidates into a compressed archive.
+14. Quarantines orphaned Windows Installer cache candidates into a compressed archive, or permanently deletes them when purge mode is requested.
 15. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
 16. Uses `winget` to update maintained applications listed in an external JSON file.
 17. Enables and runs Microsoft Defender full scan operations unless skipped.
@@ -40,7 +40,7 @@ At a high level, the script:
 The script currently defines these parameters:
 
 ```powershell
-.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-NoRebase] [-NoMSIZap]
+.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-NoRebase] [-NoMSIZap] [-MSIZapPurge]
 ```
 
 ### `-AttendedRun <username>`
@@ -82,12 +82,24 @@ Example:
 
 ### `-NoMSIZap`
 
-Skips the Windows Installer cache quarantine stage. This switch name is retained for compatibility with older script usage.
+Skips the Windows Installer cache cleanup stage. This switch name is retained for compatibility with older script usage.
 
 Example:
 
 ```powershell
 .\Tuneup-Script.ps1 -NoMSIZap
+```
+
+### `-MSIZapPurge`
+
+Permanently deletes orphaned Windows Installer cache candidates instead of placing them in a quarantine ZIP. The files are removed directly with `Remove-Item`, bypassing the Recycle Bin, and cannot be restored from a quarantine archive.
+
+`-MSIZapPurge` cannot be combined with `-NoMSIZap`.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -MSIZapPurge
 ```
 
 ## Running the Script
@@ -153,17 +165,19 @@ Before running it on a production endpoint, confirm that:
 - Downloaded third-party and Microsoft utilities are allowed by policy.
 - Microsoft Defender actions will not conflict with the endpoint's security stack.
 - Resetting the OS component store is acceptable, because it can remove the ability to uninstall superseded updates.
+- `-MSIZapPurge` is used only when permanent, immediate deletion of orphaned installer cache candidates is acceptable.
 
 ## Current Implementation Notes
 
 These notes describe the code as it currently stands, not planned behavior.
 
 - The repository does not currently include tests, CI configuration, or a module structure.
-- The script is one large procedural file with two helper functions: `Install-WinGet` and `WingetPatching`.
+- The script is one large procedural file with helper functions for winget handling, PsExec installation, disk-space metrics, and Windows Installer cache cleanup.
 - The script depends on external asset files that are not versioned in this repository.
 - The numbered maintenance sections currently run from Step 0 through Step 14.
 - Application updates always run when the OS version check and `winget` handling allow it; there is no declared skip flag for that stage.
-- Step 10 replaces the older MSIZap approach with a conservative Windows Installer cache quarantine archive under `C:\Temp\InstallerCacheQuarantine`.
+- Step 10 replaces the older MSIZap approach with a Windows Installer cache reference audit. By default, orphaned candidates are archived under `C:\Temp\InstallerCacheQuarantine`; `-MSIZapPurge` permanently deletes them instead.
+- Deprecated `cacls.exe` usage has been replaced with `icacls.exe`, and Windows package discovery uses `Get-AppxPackage`.
 - HP Image Assistant support is currently commented out and explicitly skipped.
 - Surface firmware and driver update handling is informational only.
 

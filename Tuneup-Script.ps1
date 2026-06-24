@@ -34,6 +34,7 @@
 #PARAMETERS
 #-AttendedRun: feed it the username and it will skip that user
 #-NoMSIZap: switch flag, if set it will skip Windows Installer cache quarantine
+#-MSIZapPurge: switch flag, if set it permanently deletes orphaned Windows Installer cache candidates instead of quarantining them
 #-NoRebase: switch flag, if set it will skip OS Rebase
 #-SkipDefender: switch flag, if set it will skip defender run (also set internally further down if it detects that defender is off and cannot be turned on)
 
@@ -45,8 +46,14 @@ param (
     # Do I need to skip OS Rebasing?
     [Parameter()][Switch]$NoRebase,
     # Do I need to skip Windows Installer cache quarantine?
-    [Parameter()][Switch]$NoMSIZap
+    [Parameter()][Switch]$NoMSIZap,
+    # Do I need to permanently delete orphaned Windows Installer cache candidates instead of quarantining them?
+    [Parameter()][Switch]$MSIZapPurge
 )
+
+if ($NoMSIZap.IsPresent -and $MSIZapPurge.IsPresent) {
+    throw "-NoMSIZap and -MSIZapPurge cannot be used together."
+}
 
 Function Install-WinGet {
     #Install the latest package from GitHub
@@ -67,7 +74,7 @@ Function Install-WinGet {
     }
 
     #test for requirement
-    $Requirement = Get-AppPackage "Microsoft.DesktopAppInstaller"
+    $Requirement = Get-AppxPackage -Name "Microsoft.DesktopAppInstaller"
     if (-Not $requirement) {
         Write-Verbose "Installing Desktop App Installer requirement"
         Try {
@@ -161,7 +168,11 @@ Function Install-PsExec {
     Copy-Item -Path $psExecSource -Destination $psExecDestination -Force
 }
 
-Function Compress-OrphanedInstallerCache {
+Function Invoke-OrphanedInstallerCacheCleanup {
+    Param(
+        [Parameter()][Switch]$Purge
+    )
+
     $installerCachePath = Join-Path -Path $Env:SystemRoot -ChildPath "Installer"
     $quarantineBasePath = "C:\Temp\InstallerCacheQuarantine"
     $timestamp = Get-Date -Format o | ForEach-Object { $_ -replace ":", "." }
@@ -212,6 +223,26 @@ Function Compress-OrphanedInstallerCache {
     }
 
     Write-Output "Found $($orphanedInstallerFiles.Count) orphaned Windows Installer cache candidate(s)."
+
+    if ($Purge.IsPresent) {
+        Write-Output "MSIZap purge mode enabled. Permanently deleting orphaned installer cache candidates..."
+        $purgedFileCount = 0
+
+        foreach ($file in $orphanedInstallerFiles) {
+            try {
+                Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                $purgedFileCount += 1
+            } catch {
+                Write-Output "WARNING ---------- Failed to permanently delete installer cache candidate $($file.FullName)"
+                $script:ErrorCount += 1
+                $script:ErrorLog += "Failed to purge installer cache candidate $($file.FullName).  "
+            }
+        }
+
+        Write-Output "Permanently deleted $purgedFileCount of $($orphanedInstallerFiles.Count) orphaned installer cache candidate(s)."
+        return
+    }
+
     New-Item -Path $stagedFilesPath -ItemType Directory -Force | Out-Null
 
     $quarantinedFiles = @()
@@ -371,21 +402,21 @@ $WindowsOldPath = Join-Path -Path $Env:SystemDrive -ChildPath 'Windows.old'
 if (Test-Path -Path $WindowsOldPath) {
     Write-Output "Cleaning up $WindowsOldPath..."
     takeown /F "$WindowsOldPath\*" /R /A /D Y
-    cacls "$WindowsOldPath\*.*" /C /T /grant administrators:F
+    icacls "$WindowsOldPath" /grant "*S-1-5-32-544:(OI)(CI)F" /T /C
     Remove-Item -Force -Recurse $WindowsOldPath -ErrorAction SilentlyContinue
 }
 $WindowsBTPath = Join-Path -Path $Env:SystemDrive -ChildPath '$Windows.~BT'
 if (Test-Path -Path $WindowsBTPath) {
     Write-Output "Cleaning up $WindowsBTPath..."
     takeown /F "$WindowsBTPath\*" /R /A /D Y
-    cacls "$WindowsBTPath\*.*" /C /T /grant administrators:F
+    icacls "$WindowsBTPath" /grant "*S-1-5-32-544:(OI)(CI)F" /T /C
     Remove-Item -Force -Recurse $WindowsBTPath -ErrorAction SilentlyContinue
 }
 $WindowsWSPath = Join-Path -Path $Env:SystemDrive -ChildPath '$Windows.~WS'
 if (Test-Path -Path $WindowsWSPath) {
     Write-Output "Cleaning up $WindowsWSPath..."
     takeown /F "$WindowsWSPath\*" /R /A /D Y
-    cacls "$WindowsWSPath\*.*" /C /T /grant administrators:F
+    icacls "$WindowsWSPath" /grant "*S-1-5-32-544:(OI)(CI)F" /T /C
     Remove-Item -Force -Recurse $WindowsWSPath -ErrorAction SilentlyContinue
 }
 
@@ -439,7 +470,7 @@ try {
         Install-PsExec #go grab psexec so we can run disc cleanup silently in the background / without active login session
         Invoke-Command {& "$Env:SystemDrive\PsExec.exe" -accepteula -s "cleanmgr" /sagerun:100} 
     } else {
-        Invoke-Expression {"cleanmgr /sagerun:100"}
+        & cleanmgr.exe /sagerun:100
     }
 } catch {
     Write-Output "!!!!! ------ DISK CLEANUP FAILED ------ !!!!!"
@@ -508,7 +539,7 @@ if ($PCInfo.Manufacturer.Contains("Dell")) {
         if ($ErrorVar.Contains("error code 1602")) {
             #this means that the old version of dell command is installed
             #find a way to strip it out automatically at some point
-            #$OldCommandUpdate = Get-WmiObject -Class Win32_Product | Where-Object{$_.Name -match "Dell Command"}
+            #$OldCommandUpdate = Get-CimInstance -ClassName Win32_Product | Where-Object {$_.Name -match "Dell Command"}
             #$DellPackage = Get-Package -Provider Programs -IncludeWindowsInstaller -Name $OldCommandUpdate.Name
             #check for nuget, install if not available
             Write-Output "!!!!! ------ OLDER DELL COMMAND VERSION FOUND, REMOVE AND TRY AGAIN ------ !!!!!"
@@ -619,18 +650,18 @@ try {
     Write-Output "WARNING ------- Something went wrong with cleaning up the DNS and ARP caches..."
 }
 
-#STEP 10 - Windows Installer Cache Quarantine
-#This audits Windows Installer cache files and quarantines orphaned candidates into a compressed archive instead of using MSIZap.
+#STEP 10 - Windows Installer Cache Cleanup
+#This audits Windows Installer cache files and either quarantines orphaned candidates or permanently deletes them in purge mode.
 if ($NoMSIZap.IsPresent) {
-    Write-Output "Skipping Windows Installer cache quarantine per your request..."
+    Write-Output "Skipping Windows Installer cache cleanup per your request..."
 } else 
 {
     try {
-        Compress-OrphanedInstallerCache
+        Invoke-OrphanedInstallerCacheCleanup -Purge:$MSIZapPurge
     } catch {
         $ErrorCount += 1
-        $ErrorLog += "Something went wrong with Windows Installer cache quarantine.  "
-        Write-Output "WARNING ---------- Something went wrong with Windows Installer cache quarantine"
+        $ErrorLog += "Something went wrong with Windows Installer cache cleanup.  "
+        Write-Output "WARNING ---------- Something went wrong with Windows Installer cache cleanup"
     }
 }
 
