@@ -171,6 +171,126 @@ Function Install-PsExec {
     Copy-Item -Path $psExecSource -Destination $psExecDestination -Force
 }
 
+Function Install-DotNetFramework48 {
+    $script:DotNetFramework48RequiresReboot = $false
+    $dotNetRelease = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction SilentlyContinue).Release
+
+    if ($dotNetRelease -ge 528040) {
+        Write-Output ".NET Framework 4.8 or higher is installed."
+        return
+    }
+
+    $dotNetInstallerPath = Join-Path -Path $Env:SystemDrive -ChildPath "Net48.exe"
+    Write-Output "Installing .NET Framework 4.8..."
+    Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2088631" -OutFile $dotNetInstallerPath
+    $dotNetInstall = Start-Process -FilePath $dotNetInstallerPath -ArgumentList "/q", "/norestart" -Wait -PassThru
+
+    if ($dotNetInstall.ExitCode -notin 0, 3010) {
+        throw ".NET Framework 4.8 installation failed with exit code $($dotNetInstall.ExitCode)."
+    }
+
+    if ($dotNetInstall.ExitCode -eq 3010) {
+        $script:DotNetFramework48RequiresReboot = $true
+        Write-Output ".NET Framework 4.8 installed successfully and requires a reboot."
+    }
+}
+
+Function Install-HPImageAssistantUpdates {
+    $hpiaPageUri = "https://ftp.ext.hp.com/pub/caps-softpaq/cmit/HPIA.html"
+    $hpiaBasePath = Join-Path -Path $Env:SystemDrive -ChildPath "Temp\HPIA"
+    $hpiaInstallerPath = Join-Path -Path $hpiaBasePath -ChildPath "HPIA-SoftPaq.exe"
+    $hpiaToolPath = Join-Path -Path $hpiaBasePath -ChildPath "Tool"
+    $hpiaDownloadPath = Join-Path -Path $hpiaBasePath -ChildPath "Downloads"
+    $hpiaReportTimestamp = Get-Date -Format "yyyy-MM-dd_HH.mm.ss"
+    $hpiaReportPath = Join-Path -Path $hpiaBasePath -ChildPath "Reports\$hpiaReportTimestamp"
+
+    Install-DotNetFramework48
+    if ($script:DotNetFramework48RequiresReboot) {
+        throw ".NET Framework 4.8 requires a reboot before HP Image Assistant can run."
+    }
+
+    New-Item -Path $hpiaBasePath -ItemType Directory -Force | Out-Null
+    Remove-Item -Path $hpiaToolPath -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Output "Finding the latest HP Image Assistant SoftPaq..."
+    $hpiaPage = Invoke-WebRequest -Uri $hpiaPageUri -UseBasicParsing
+    $hpiaDownloadUri = $hpiaPage.Links |
+        Where-Object { $_.href -match "^https://hpia\.hpcloud\.hp\.com/downloads/hpia/hp-hpia-[0-9.]+\.exe$" } |
+        Select-Object -First 1 -ExpandProperty href
+
+    if ([string]::IsNullOrWhiteSpace($hpiaDownloadUri)) {
+        $hpiaDownloadMatch = [regex]::Match(
+            $hpiaPage.Content,
+            "https://hpia\.hpcloud\.hp\.com/downloads/hpia/hp-hpia-[0-9.]+\.exe"
+        )
+        $hpiaDownloadUri = $hpiaDownloadMatch.Value
+    }
+
+    if ([string]::IsNullOrWhiteSpace($hpiaDownloadUri)) {
+        throw "Unable to find the current HP Image Assistant download on HP's official page."
+    }
+
+    Write-Output "Downloading HP Image Assistant from $hpiaDownloadUri..."
+    Invoke-WebRequest -Uri $hpiaDownloadUri -OutFile $hpiaInstallerPath
+
+    $hpiaSignature = Get-AuthenticodeSignature -FilePath $hpiaInstallerPath
+    if ($hpiaSignature.Status -ne "Valid" -or $hpiaSignature.SignerCertificate.Subject -notmatch "HP Inc") {
+        throw "The downloaded HP Image Assistant SoftPaq did not have a valid HP digital signature."
+    }
+
+    Write-Output "Extracting HP Image Assistant..."
+    $hpiaExtract = Start-Process -FilePath $hpiaInstallerPath -ArgumentList "/s", "/e", "/f", $hpiaToolPath -Wait -PassThru
+    $hpiaExecutable = Get-ChildItem -Path $hpiaToolPath -Filter "HPImageAssistant.exe" -File -Recurse |
+        Select-Object -First 1
+    if (-not $hpiaExecutable) {
+        throw "HPImageAssistant.exe was not found after extracting the SoftPaq. Wrapper exit code: $($hpiaExtract.ExitCode)."
+    }
+    if ($hpiaExtract.ExitCode -ne 0) {
+        Write-Output "HP's SoftPaq wrapper returned exit code $($hpiaExtract.ExitCode), but HPImageAssistant.exe was extracted successfully."
+    }
+
+    foreach ($category in "Drivers", "Firmware") {
+        $categoryDownloadPath = Join-Path -Path $hpiaDownloadPath -ChildPath $category
+        $categoryReportPath = Join-Path -Path $hpiaReportPath -ChildPath $category
+        New-Item -Path $categoryDownloadPath -ItemType Directory -Force | Out-Null
+        New-Item -Path $categoryReportPath -ItemType Directory -Force | Out-Null
+
+        Write-Output "Analyzing and installing HP $category updates..."
+        $hpiaArguments = @(
+            "/Operation:Analyze",
+            "/Category:$category",
+            "/Selection:All",
+            "/Action:Install",
+            "/Silent",
+            "/AutoCleanup",
+            "/IgnoreGenericOsError",
+            "/ReportFolder:$categoryReportPath",
+            "/SoftPaqDownloadFolder:$categoryDownloadPath"
+        )
+        $hpiaProcess = Start-Process -FilePath $hpiaExecutable.FullName -ArgumentList $hpiaArguments -Wait -PassThru
+
+        switch ($hpiaProcess.ExitCode) {
+            0 { Write-Output "HP $category updates completed successfully." }
+            256 { Write-Output "HP Image Assistant found no $category recommendations." }
+            257 { Write-Output "HP Image Assistant found no selected $category recommendations." }
+            3010 { Write-Output "HP $category updates completed successfully and require a reboot." }
+            3011 {
+                Write-Output "WARNING ---------- One or more HP $category updates require manual installation and were skipped."
+                $script:ErrorCount += 1
+                $script:ErrorLog += "One or more HP $category updates require manual installation.  "
+            }
+            default {
+                throw "HP Image Assistant $category processing failed with exit code $($hpiaProcess.ExitCode)."
+            }
+        }
+    }
+
+    Remove-Item -Path $hpiaInstallerPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $hpiaToolPath -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $hpiaDownloadPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Output "HP Image Assistant reports retained at $hpiaReportPath"
+}
+
 Function Invoke-OrphanedInstallerCacheCleanup {
     Param(
         [Parameter()][Switch]$Purge
@@ -481,11 +601,11 @@ try {
     $ErrorLog += "Disk Cleanup failed!  "
 }
 
-#STEP 6 - Dell Command Update
-Write-Output "Is this a Dell?"
+#STEP 6 - Manufacturer Driver and Firmware Updates
+Write-Output "Checking system manufacturer for supported update tooling..."
 $PCInfo = Get-CimInstance -ClassName Win32_ComputerSystem
 if ($PCInfo.Manufacturer.Contains("Dell")) {
-    Write-Output "Yes!  Checking for Dell Command Update..."
+    Write-Output "Dell system detected. Checking for Dell Command Update..."
     Install-PsExec
     if (Test-Path -Path "$Env:ProgramFiles\Dell\CommandUpdate\dcu-cli.exe") {
         Write-Output "Found Dell Command Update!"
@@ -527,13 +647,8 @@ if ($PCInfo.Manufacturer.Contains("Dell")) {
         }
     } else {
         Write-Output "Dell Command Update not present...attempting install..."
-        if ((Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full").Release -ge 528040) { #Check for .Net 4.8
-            Write-Output ".NET version 4.8 or higher installed!  Proceeding to Dell Command Update install..."
-        } else {
-            Write-Output "Installing .NET 4.8..."
-            Start-BitsTransfer -Source 'https://go.microsoft.com/fwlink/?linkid=2088631' -Destination "$Env:SystemDrive\Net48.exe"; & "$Env:SystemDrive\Net48.exe" /q /norestart
-            Write-Output "Proceeding to Dell Command Update install..."
-        }
+        Install-DotNetFramework48
+        Write-Output "Proceeding to Dell Command Update install..."
         Write-Output "Downloading Dell Command Update installer..."
         Invoke-WebRequest -Uri "https://github.com/NetlinkSolutions/Script-Assets/raw/main/DellCommandSetup.exe" -OutFile "$Env:SystemDrive\DellCommandSetup.exe"
         Write-Output "Installing Dell Command Update..."
@@ -562,21 +677,15 @@ if ($PCInfo.Manufacturer.Contains("Dell")) {
         # Hyper-V VM
         Write-Output "This is a Hyper-V VM - it doesn't need driver updates."
     }
-} elseif ($PCInfo.Manufacturer.Contains("HP")) {
-    # HP Stuff (Desktops Only)
-    # HP Image Assistant is odd and doesn't actually 'Install' so to speak.
-    #Buggy, disabled for now
-    Write-Output "HPIA install/update code buggy at the moment, skipping"
-    #Write-Output "Getting HP Image Assistant..."
-    #Invoke-WebRequest -Uri "https://hpia.hpcloud.hp.com/downloads/hpia/hp-hpia-5.1.7.exe" -OutFile "$Env:SystemRoot\Temp\HPIA.exe"
-    #Write-Output "`"Installing`" HP Image Assistant..."
-    #Invoke-Expression {"$Env:SystemRoot\Temp\HPIA.exe /s /e /f $Env:ProgramFiles\HP\HPIA"}
-    #Write-Output "Installing Drivers..."
-    #Invoke-Expression {"$Env:ProgramFiles\HP\HPIA\HPImageAssistant.exe /Action:Install /AutoCleanup /Category:Drivers /Silent"}
-    #Write-Output "Installing Firmware..."
-    #Invoke-Expression {"$Env:ProgramFiles\HP\HPIA\HPImageAssistant.exe /Action:Install /AutoCleanup /Category:Firmware /Silent"}
-    #Write-Output "Remove HPIA installer..."
-    #Remove-Item -Path "$Env:SystemRoot\Temp\HPIA.exe" -Force -ErrorAction SilentlyContinue
+} elseif ($PCInfo.Manufacturer -match "^(HP|Hewlett-Packard)") {
+    Write-Output "HP system detected. Running HP Image Assistant..."
+    try {
+        Install-HPImageAssistantUpdates
+    } catch {
+        Write-Output "WARNING ---------- HP Image Assistant failed: $($_.Exception.Message)"
+        $ErrorCount += 1
+        $ErrorLog += "HP Image Assistant failed: $($_.Exception.Message)  "
+    }
 } else {
     $Manufacturer = $PCInfo.Manufacturer
     Write-Output "This is a $Manufacturer. Marty needs to write support for this manufacturer."
@@ -746,6 +855,9 @@ Remove-Item -Path "$Env:SystemDrive\TuneUpReg.reg" -Force -ErrorAction SilentlyC
 Remove-Item -Path "$Env:SystemDrive\MaintainedPrograms.json" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$Env:SystemDrive\UserTempFileLocations.json" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$Env:SystemDrive\Net48.exe" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$Env:SystemDrive\Temp\HPIA\HPIA-SoftPaq.exe" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$Env:SystemDrive\Temp\HPIA\Tool" -Force -Recurse -ErrorAction SilentlyContinue
+Remove-Item -Path "$Env:SystemDrive\Temp\HPIA\Downloads" -Force -Recurse -ErrorAction SilentlyContinue
 if ($ErrorCount -gt 0) {
     Write-Output "I HAD $ErrorCount ERRORS!"
     Write-Output "FINAL ERROR LOG FOLLOWS:"

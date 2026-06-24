@@ -22,18 +22,19 @@ At a high level, the script:
 7. Clears Windows temp, prefetch, Windows Error Reporting, Windows Search temp data, CBS logs, and Windows Update cache.
 8. Runs Disk Cleanup using downloaded registry settings and PsExec when unattended.
 9. Performs Dell Command Update handling on Dell systems.
-10. Skips or reports unsupported handling for some Microsoft, Surface, Hyper-V, HP, and other manufacturer cases.
-11. Runs Windows repair and optimization commands such as SFC, `Repair-WindowsImage`, `Repair-Volume`, and `Optimize-Volume`.
-12. Optionally performs an OS component store reset base operation.
-13. Clears DNS, ARP, and Winsock state.
-14. Quarantines orphaned Windows Installer cache candidates into a compressed archive, or permanently deletes them when purge mode is requested.
-15. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
-16. Uses `winget` to update maintained applications listed in an external JSON file.
-17. Enables and runs Microsoft Defender full scan operations unless skipped.
-18. Removes temporary downloaded assets.
-19. Prints a final error count and error log to the transcript.
-20. Logs ending system-drive free space and net free-space change.
-21. Optionally reboots when `-RebootWhenDone` is supplied.
+10. Uses HP Image Assistant to install driver and firmware recommendations on supported HP systems.
+11. Skips or reports unsupported handling for Microsoft Surface, Hyper-V, and other manufacturer cases.
+12. Runs Windows repair and optimization commands such as SFC, `Repair-WindowsImage`, `Repair-Volume`, and `Optimize-Volume`.
+13. Optionally performs an OS component store reset base operation.
+14. Clears DNS, ARP, and Winsock state.
+15. Quarantines orphaned Windows Installer cache candidates into a compressed archive, or permanently deletes them when purge mode is requested.
+16. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
+17. Uses `winget` to update maintained applications listed in an external JSON file.
+18. Enables and runs Microsoft Defender full scan operations unless skipped.
+19. Removes temporary downloaded assets.
+20. Prints a final error count and error log to the transcript.
+21. Logs ending system-drive free space and net free-space change.
+22. Optionally reboots when `-RebootWhenDone` is supplied.
 
 ## Parameters
 
@@ -147,6 +148,8 @@ The script downloads or calls assets from several external locations:
 - `https://download.sysinternals.com/files/PSTools.zip`
 - `https://github.com/NetlinkSolutions/Script-Assets/raw/main/DellCommandSetup.exe`
 - `https://go.microsoft.com/fwlink/?linkid=2088631`
+- `https://ftp.ext.hp.com/pub/caps-softpaq/cmit/HPIA.html`
+- The current signed HPIA SoftPaq URL published on HP's official HPIA page.
 
 The script assumes these URLs are reachable at runtime and that the downloaded assets are trusted.
 
@@ -187,7 +190,8 @@ These notes describe the code as it currently stands, not planned behavior.
 - Application updates always run when the OS version check and `winget` handling allow it; there is no declared skip flag for that stage.
 - Step 10 replaces the older MSIZap approach with a Windows Installer cache reference audit. By default, orphaned candidates are archived under `C:\Temp\InstallerCacheQuarantine`; `-MSIZapPurge` permanently deletes them instead.
 - Deprecated `cacls.exe` usage has been replaced with `icacls.exe`, and Windows package discovery uses `Get-AppxPackage`.
-- HP Image Assistant support is currently commented out and explicitly skipped.
+- On systems whose manufacturer is reported as HP or Hewlett-Packard, Step 6 discovers the latest HPIA SoftPaq from HP's official page, verifies its HP digital signature, extracts it, and silently installs driver and firmware recommendations.
+- HPIA reports are retained under `%SystemDrive%\Temp\HPIA\Reports`; downloaded HPIA tooling and SoftPaq files are removed.
 - Surface firmware and driver update handling is informational only.
 
 ## AI-Assisted Development Disclosure
