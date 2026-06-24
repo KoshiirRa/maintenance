@@ -190,6 +190,10 @@ These notes describe the code as it currently stands, not planned behavior.
 - HP Image Assistant support is currently commented out and explicitly skipped.
 - Surface firmware and driver update handling is informational only.
 
+## AI-Assisted Development Disclosure
+
+This script was originally written by Marty Marks. Codex and ChatGPT have subsequently been used as AI-assisted development tools to help review, document, maintain, and improve the script. AI-generated suggestions and changes are reviewed and accepted by the repository maintainer, who remains responsible for the project's direction and published code.
+
 ## License
 
 This project is licensed under the MIT License. See `LICENSE`.
