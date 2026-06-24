@@ -1,5 +1,5 @@
 #Author: Marty Marks
-#Revision: 2.3
+#Revision: 2.8
 #
 #History:
 #1 - initial commit
@@ -22,6 +22,11 @@
 #2.1 - added two lines to application cleanup to deal with the fact that Intuit never cleans up after itself.
 #2.2 - Had Codex add some improvements.
 #2.3 - merge back in stuff I forgot to push from the work machine.  suppress errors on Intuit cleanup, expand QB cache cleanup, add logic to see if github is accessible.
+#2.4 - Fixed step numbering, parameter handling, typos, and path issues. Moved public text assets to the script-assets repository and replaced the repository-hosted PsExec binary with the official Microsoft Sysinternals PSTools.zip download.
+#2.5 - Replaced MSIZap with an orphaned Windows Installer cache audit that stores candidates in an optimally compressed quarantine archive before removing the originals.
+#2.6 - Added transcript metrics for system-drive free space at the beginning and end of each run.
+#2.7 - Added -MSIZapPurge for immediate permanent deletion of orphaned installer cache candidates and -RebootWhenDone to make rebooting opt-in. Replaced deprecated command usage and updated package detection.
+#2.8 - Enabled HP Image Assistant support for HP and Hewlett-Packard systems. The script now discovers the latest official signed HPIA SoftPaq, extracts it, installs driver and firmware recommendations, handles documented return codes, and retains timestamped reports.
 #
 #Description: Okay so this is a horrible, horrible idea, but I'm going to try and consolidate my 4-batch-file-plus-1-powershell-script tuneup process we had on Automate into a single powershell script.  Yes, I'm crazy.  Yes, this file is going to be full of a lot of bastardized code for a while.
 #
