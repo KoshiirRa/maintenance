@@ -33,14 +33,14 @@ At a high level, the script:
 18. Removes temporary downloaded assets.
 19. Prints a final error count and error log to the transcript.
 20. Logs ending system-drive free space and net free-space change.
-21. Reboots automatically after unattended runs.
+21. Optionally reboots when `-RebootWhenDone` is supplied.
 
 ## Parameters
 
 The script currently defines these parameters:
 
 ```powershell
-.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-NoRebase] [-NoMSIZap] [-MSIZapPurge]
+.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-NoRebase] [-NoMSIZap] [-MSIZapPurge] [-RebootWhenDone]
 ```
 
 ### `-AttendedRun <username>`
@@ -51,7 +51,6 @@ When this is supplied:
 
 - The matching user is skipped during sign-out.
 - Disk Cleanup runs visibly in the active user context.
-- The script does not automatically reboot at the end.
 - `winget` installation can be attempted in the logged-in user context if `winget` is missing.
 
 Example:
@@ -102,6 +101,16 @@ Example:
 .\Tuneup-Script.ps1 -MSIZapPurge
 ```
 
+### `-RebootWhenDone`
+
+Forcibly reboots the computer after cleanup and transcript logging complete. Without this switch, the script leaves the computer running whether the run is attended or unattended.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -RebootWhenDone
+```
+
 ## Running the Script
 
 Run from an elevated Windows PowerShell session:
@@ -118,13 +127,13 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 .\Tuneup-Script.ps1 -AttendedRun "username"
 ```
 
-The unattended path ends with:
+The script does not reboot by default. To request a forced reboot after cleanup:
 
 ```powershell
-Restart-Computer -Force
+.\Tuneup-Script.ps1 -RebootWhenDone
 ```
 
-Do not start an unattended run unless an immediate forced reboot is acceptable.
+Only use `-RebootWhenDone` when an immediate forced reboot after maintenance is acceptable.
 
 ## External Assets and Services
 
@@ -160,7 +169,7 @@ This script is intentionally invasive. It deletes files, resets Windows Update s
 Before running it on a production endpoint, confirm that:
 
 - The endpoint has a current backup or restore path.
-- A forced reboot is acceptable.
+- A forced reboot is acceptable when `-RebootWhenDone` is supplied.
 - Active users can be signed out.
 - Downloaded third-party and Microsoft utilities are allowed by policy.
 - Microsoft Defender actions will not conflict with the endpoint's security stack.

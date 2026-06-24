@@ -36,6 +36,7 @@
 #-NoMSIZap: switch flag, if set it will skip Windows Installer cache quarantine
 #-MSIZapPurge: switch flag, if set it permanently deletes orphaned Windows Installer cache candidates instead of quarantining them
 #-NoRebase: switch flag, if set it will skip OS Rebase
+#-RebootWhenDone: switch flag, if set it will forcibly reboot the computer after cleanup completes
 #-SkipDefender: switch flag, if set it will skip defender run (also set internally further down if it detects that defender is off and cannot be turned on)
 
 param (
@@ -48,7 +49,9 @@ param (
     # Do I need to skip Windows Installer cache quarantine?
     [Parameter()][Switch]$NoMSIZap,
     # Do I need to permanently delete orphaned Windows Installer cache candidates instead of quarantining them?
-    [Parameter()][Switch]$MSIZapPurge
+    [Parameter()][Switch]$MSIZapPurge,
+    # Do I need to forcibly reboot the computer after cleanup completes?
+    [Parameter()][Switch]$RebootWhenDone
 )
 
 if ($NoMSIZap.IsPresent -and $MSIZapPurge.IsPresent) {
@@ -447,7 +450,7 @@ if (Test-Path -Path "$Env:ProgramData\Microsoft\Search\Data\Temp") {
     Remove-Item -Force -Recurse "$Env:ProgramData\Microsoft\Search\Data\Temp" -ErrorAction SilentlyContinue
 }
 ### Clean up CBS logs ###
-Write-Output "Stopping TrustedInstaller service..." #no need to start it back up since it starts up as needed and we're gonna reboot anyway at the end.
+Write-Output "Stopping TrustedInstaller service..." #TrustedInstaller starts again on demand when Windows needs it.
 Stop-Service -Name "TrustedInstaller" -Force
 Write-Output "Cleaning up CBS Logs..."
 Remove-Item -Force -Recurse "$Env:SystemRoot\Logs\CBS\*" -ErrorAction SilentlyContinue
@@ -734,7 +737,7 @@ if ($SkipDefender.IsPresent -or $SkipDefender -eq "TRUE") {
     Remove-MpThreat
 }
 
-#STEP 14 - Clean up after ourselves and do a reboot
+#STEP 14 - Clean up after ourselves and optionally reboot
 Remove-Item -Path "$Env:SystemDrive\PsExec.exe" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "C:\Temp\PSTools.zip" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "C:\Temp\PSTools" -Force -Recurse -ErrorAction SilentlyContinue
@@ -759,11 +762,11 @@ Write-SystemDriveFreeSpaceMetric -Label "END" -Metric $EndingSystemDriveFreeSpac
 $FreedSystemDriveBytes = $EndingSystemDriveFreeSpace.FreeBytes - $StartingSystemDriveFreeSpace.FreeBytes
 $FreedSystemDriveGB = [math]::Round(($FreedSystemDriveBytes / 1GB), 2)
 Write-Output "SYSTEM DRIVE FREE SPACE CHANGE: $FreedSystemDriveGB GB ($FreedSystemDriveBytes bytes)"
-if ([string]::IsNullOrEmpty($AttendedRun)) {
+if ($RebootWhenDone.IsPresent) {
     Write-Output "Rebooting..."
     Stop-Transcript
     Restart-Computer -Force
 } else {
-   Write-Output "Cleanup completed, no auto reboot because attended run..."
-   Stop-Transcript
+    Write-Output "Cleanup completed. The computer will not reboot unless -RebootWhenDone is specified."
+    Stop-Transcript
 }
