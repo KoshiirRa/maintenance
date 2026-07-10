@@ -14,7 +14,7 @@ The current codebase is small:
 At a high level, the script:
 
 1. Starts a transcript log on the system drive.
-2. Checks for `winget`, and attempts attended installation when possible.
+2. Checks for `winget`, and attempts attended installation when possible unless `-SkipWinget` is supplied.
 3. Signs out users unless an attended user is specified.
 4. Deletes user profile temp files and cache folders defined in an external JSON file.
 5. Clears certificate URL cache entries.
@@ -29,7 +29,7 @@ At a high level, the script:
 14. Clears DNS, ARP, and Winsock state.
 15. Quarantines orphaned Windows Installer cache candidates into a compressed archive, or permanently deletes them when purge mode is requested.
 16. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
-17. Uses `winget` to update maintained applications listed in an external JSON file.
+17. Uses `winget` to update maintained applications listed in an external JSON file unless `-SkipWinget` is supplied.
 18. Enables and runs Microsoft Defender full scan operations unless skipped.
 19. Removes temporary downloaded assets.
 20. Prints a final error count and error log to the transcript.
@@ -41,7 +41,7 @@ At a high level, the script:
 The script currently defines these parameters:
 
 ```powershell
-.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-NoRebase] [-NoMSIZap] [-MSIZapPurge] [-RebootWhenDone]
+.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-SkipWinget] [-NoRebase] [-NoMSIZap] [-MSIZapPurge] [-RebootWhenDone]
 ```
 
 ### `-AttendedRun <username>`
@@ -52,7 +52,7 @@ When this is supplied:
 
 - The matching user is skipped during sign-out.
 - Disk Cleanup runs visibly in the active user context.
-- `winget` installation can be attempted in the logged-in user context if `winget` is missing.
+- `winget` installation can be attempted in the logged-in user context if `winget` is missing, unless `-SkipWinget` is supplied.
 
 Example:
 
@@ -68,6 +68,18 @@ Example:
 
 ```powershell
 .\Tuneup-Script.ps1 -SkipDefender
+```
+
+### `-SkipWinget`
+
+Skips all winget-related handling. When supplied, the script does not check whether `winget` is available, does not attempt to install App Installer or winget, does not download `MaintainedPrograms.json`, and does not run winget application updates.
+
+Use this for environments where winget is blocked, unsupported, broken, or intentionally unavailable.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -SkipWinget
 ```
 
 ### `-NoRebase`
@@ -187,7 +199,7 @@ These notes describe the code as it currently stands, not planned behavior.
 - The script is one large procedural file with helper functions for winget handling, PsExec installation, disk-space metrics, and Windows Installer cache cleanup.
 - The script depends on external asset files that are not versioned in this repository.
 - The numbered maintenance sections currently run from Step 0 through Step 14.
-- Application updates always run when the OS version check and `winget` handling allow it; there is no declared skip flag for that stage.
+- Application updates run when the OS version check and `winget` handling allow it. Supply `-SkipWinget` to bypass winget detection, installation attempts, `MaintainedPrograms.json` download, and application updates.
 - Step 10 replaces the older MSIZap approach with a Windows Installer cache reference audit. By default, orphaned candidates are archived under `C:\Temp\InstallerCacheQuarantine`; `-MSIZapPurge` permanently deletes them instead.
 - Deprecated `cacls.exe` usage has been replaced with `icacls.exe`, and Windows package discovery uses `Get-AppxPackage`.
 - On systems whose manufacturer is reported as HP or Hewlett-Packard, Step 6 discovers the latest HPIA SoftPaq from HP's official page, verifies its HP digital signature, extracts it, and silently installs driver and firmware recommendations.

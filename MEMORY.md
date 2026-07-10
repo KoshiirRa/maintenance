@@ -36,6 +36,7 @@ This file stores durable project context for future work in this repository.
 - `-MSIZapPurge` bypasses quarantine and permanently deletes candidates with `Remove-Item`.
 - `-NoMSIZap` skips installer-cache cleanup.
 - `-NoMSIZap` and `-MSIZapPurge` together should throw.
+- `-SkipWinget` skips winget detection, winget/App Installer installation attempts, maintained-program download, and winget application updates.
 - Default script behavior does not reboot.
 - `-RebootWhenDone` performs the final reboot after cleanup and transcript logging.
 - System-drive free space is logged near the start and end of the transcript.

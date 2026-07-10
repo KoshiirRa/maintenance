@@ -1,5 +1,5 @@
 #Author: Marty Marks
-#Revision: 2.8
+#Revision: 2.9
 #
 #History:
 #1 - initial commit
@@ -27,6 +27,7 @@
 #2.6 - Added transcript metrics for system-drive free space at the beginning and end of each run.
 #2.7 - Added -MSIZapPurge for immediate permanent deletion of orphaned installer cache candidates and -RebootWhenDone to make rebooting opt-in. Replaced deprecated command usage and updated package detection.
 #2.8 - Enabled HP Image Assistant support for HP and Hewlett-Packard systems. The script now discovers the latest official signed HPIA SoftPaq, extracts it, installs driver and firmware recommendations, handles documented return codes, and retains timestamped reports.
+#2.9 - Added -SkipWinget to bypass all winget detection, installation, and application update processing for environments where winget is unavailable or unsupported.
 #
 #Description: Okay so this is a horrible, horrible idea, but I'm going to try and consolidate my 4-batch-file-plus-1-powershell-script tuneup process we had on Automate into a single powershell script.  Yes, I'm crazy.  Yes, this file is going to be full of a lot of bastardized code for a while.
 #
@@ -43,6 +44,7 @@
 #-NoRebase: switch flag, if set it will skip OS Rebase
 #-RebootWhenDone: switch flag, if set it will forcibly reboot the computer after cleanup completes
 #-SkipDefender: switch flag, if set it will skip defender run (also set internally further down if it detects that defender is off and cannot be turned on)
+#-SkipWinget: switch flag, if set it will skip winget detection, installation, and application updates
 
 param (
     # Am I watching this run locally or not?
@@ -56,7 +58,9 @@ param (
     # Do I need to permanently delete orphaned Windows Installer cache candidates instead of quarantining them?
     [Parameter()][Switch]$MSIZapPurge,
     # Do I need to forcibly reboot the computer after cleanup completes?
-    [Parameter()][Switch]$RebootWhenDone
+    [Parameter()][Switch]$RebootWhenDone,
+    # Do I need to skip winget detection, installation, and application updates?
+    [Parameter()][Switch]$SkipWinget
 )
 
 if ($NoMSIZap.IsPresent -and $MSIZapPurge.IsPresent) {
@@ -437,14 +441,18 @@ $ErrorCount = 0 #0 = no, >0 = yes
 $ErrorLog = ""
 $HomeSKU = $false
 $SystemDriveLetter = $Env:SystemDrive.Trim(":")
-try {
-    winget
-} catch {
-    if ([string]::IsNullOrEmpty($AttendedRun)) {
-        Write-Output "Machine missing winget!!!!!"
-        Write-Output "Cannot install Winget in System scope, relaunch script in attended mode and run as logged-in user!"
-    } else {
-        Install-WinGet
+if ($SkipWinget.IsPresent) {
+    Write-Output "Skipping winget detection and installation because -SkipWinget was supplied."
+} else {
+    try {
+        winget
+    } catch {
+        if ([string]::IsNullOrEmpty($AttendedRun)) {
+            Write-Output "Machine missing winget!!!!!"
+            Write-Output "Cannot install Winget in System scope, relaunch script in attended mode and run as logged-in user!"
+        } else {
+            Install-WinGet
+        }
     }
 }
 
@@ -802,23 +810,27 @@ Get-ChildItem "C:\ProgramData\Intuit\Quickbooks Enterprise Solutions*\Components
 Get-ChildItem "C:\ProgramData\Intuit\Quickbooks Enterprise Solutions*\Components\QBUpdateCache*" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 #STEP 12 - Use Winget to upgrade specific applications
-Write-Output "Checking to see if we can use winget to do program updates..."
-if ((Get-CimInstance Win32_OperatingSystem).version -gt 10.0.16299) {#Are we new enough to have winget?
-    try {
-        WingetPatching
-    } catch {
-        Write-Output "Where is Winget?  Attempting to install Winget!"
-        Install-WinGet
+if ($SkipWinget.IsPresent) {
+    Write-Output "Skipping winget application updates because -SkipWinget was supplied."
+} else {
+    Write-Output "Checking to see if we can use winget to do program updates..."
+    if ((Get-CimInstance Win32_OperatingSystem).version -gt 10.0.16299) {#Are we new enough to have winget?
         try {
             WingetPatching
         } catch {
-            Write-Output "Nope still no Winget.  Skipping the rest of this."
+            Write-Output "Where is Winget?  Attempting to install Winget!"
+            Install-WinGet
+            try {
+                WingetPatching
+            } catch {
+                Write-Output "Nope still no Winget.  Skipping the rest of this."
+            }
         }
+    } else {
+        Write-Output "Winget not available.  Have a sadface :("
+        $ErrorCount += 1
+        $ErrorLog += "Winget is not available, cannot perform application updates.  WARNING THAT MEANS THIS MACHINE IS RUNNING A REALLY OLD VERSION OF WINDOWS 10.  "
     }
-} else { 
-    Write-Output "Winget not available.  Have a sadface :("
-    $ErrorCount += 1
-    $ErrorLog += "Winget is not available, cannot perform application updates.  WARNING THAT MEANS THIS MACHINE IS RUNNING A REALLY OLD VERSION OF WINDOWS 10.  "
 }
 
 #STEP 13 - Windows Defender Operations
