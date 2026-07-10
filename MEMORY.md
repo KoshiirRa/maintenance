@@ -37,6 +37,7 @@ This file stores durable project context for future work in this repository.
 - `-NoMSIZap` skips installer-cache cleanup.
 - `-NoMSIZap` and `-MSIZapPurge` together should throw.
 - `-SkipWinget` skips winget detection, winget/App Installer installation attempts, maintained-program download, and winget application updates.
+- `-NukeOSTs` permanently deletes Outlook `.ost` files in standard user-profile locations only when they have not been modified in at least one year.
 - Default script behavior does not reboot.
 - `-RebootWhenDone` performs the final reboot after cleanup and transcript logging.
 - System-drive free space is logged near the start and end of the transcript.
@@ -79,4 +80,3 @@ Last retrieved via public GitHub REST API:
 - `#5 Hunt for more cached updaters/installers` - enhancement.
 
 Refresh issues before making decisions based on this list.
-

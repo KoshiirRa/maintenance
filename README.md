@@ -28,7 +28,7 @@ At a high level, the script:
 13. Optionally performs an OS component store reset base operation.
 14. Clears DNS, ARP, and Winsock state.
 15. Quarantines orphaned Windows Installer cache candidates into a compressed archive, or permanently deletes them when purge mode is requested.
-16. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks.
+16. Performs application-specific cleanup for Teams, Adobe, AAD Broker Plugin, and QuickBooks, and can optionally delete stale Outlook OST files.
 17. Uses `winget` to update maintained applications listed in an external JSON file unless `-SkipWinget` is supplied.
 18. Enables and runs Microsoft Defender full scan operations unless skipped.
 19. Removes temporary downloaded assets.
@@ -41,7 +41,7 @@ At a high level, the script:
 The script currently defines these parameters:
 
 ```powershell
-.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-SkipWinget] [-NoRebase] [-NoMSIZap] [-MSIZapPurge] [-RebootWhenDone]
+.\Tuneup-Script.ps1 [-AttendedRun <username>] [-SkipDefender] [-SkipWinget] [-NoRebase] [-NoMSIZap] [-MSIZapPurge] [-NukeOSTs] [-RebootWhenDone]
 ```
 
 ### `-AttendedRun <username>`
@@ -112,6 +112,23 @@ Example:
 
 ```powershell
 .\Tuneup-Script.ps1 -MSIZapPurge
+```
+
+### `-NukeOSTs`
+
+Permanently deletes Outlook `.ost` files in standard Outlook user-profile locations when they have not been modified in at least one year. The files are removed directly with `Remove-Item`, bypassing the Recycle Bin.
+
+The script searches these profile-relative locations:
+
+- `%SystemDrive%\Users\<user>\AppData\Local\Microsoft\Outlook\*.ost`
+- `%SystemDrive%\Users\<user>\Local Settings\Application Data\Microsoft\Outlook\*.ost`
+
+Use this only when removing old cached Exchange/Outlook data files is acceptable. Active or recently used OST files are skipped by the one-year `LastWriteTime` cutoff, and locked files are logged as failures instead of stopping the rest of the script.
+
+Example:
+
+```powershell
+.\Tuneup-Script.ps1 -NukeOSTs
 ```
 
 ### `-RebootWhenDone`
@@ -190,6 +207,7 @@ Before running it on a production endpoint, confirm that:
 - Microsoft Defender actions will not conflict with the endpoint's security stack.
 - Resetting the OS component store is acceptable, because it can remove the ability to uninstall superseded updates.
 - `-MSIZapPurge` is used only when permanent, immediate deletion of orphaned installer cache candidates is acceptable.
+- `-NukeOSTs` is used only when permanent deletion of Outlook OST files that have not been modified in at least one year is acceptable.
 
 ## Current Implementation Notes
 
@@ -201,6 +219,7 @@ These notes describe the code as it currently stands, not planned behavior.
 - The numbered maintenance sections currently run from Step 0 through Step 14.
 - Application updates run when the OS version check and `winget` handling allow it. Supply `-SkipWinget` to bypass winget detection, installation attempts, `MaintainedPrograms.json` download, and application updates.
 - Step 10 replaces the older MSIZap approach with a Windows Installer cache reference audit. By default, orphaned candidates are archived under `C:\Temp\InstallerCacheQuarantine`; `-MSIZapPurge` permanently deletes them instead.
+- `-NukeOSTs` runs during Step 11 and deletes stale `.ost` files from standard Outlook profile paths only when they have not been modified in at least one year.
 - Deprecated `cacls.exe` usage has been replaced with `icacls.exe`, and Windows package discovery uses `Get-AppxPackage`.
 - On systems whose manufacturer is reported as HP or Hewlett-Packard, Step 6 discovers the latest HPIA SoftPaq from HP's official page, verifies its HP digital signature, extracts it, and silently installs driver and firmware recommendations.
 - HPIA reports are retained under `%SystemDrive%\Temp\HPIA\Reports`; downloaded HPIA tooling and SoftPaq files are removed.

@@ -1,5 +1,5 @@
 #Author: Marty Marks
-#Revision: 2.9
+#Revision: 2.10
 #
 #History:
 #1 - initial commit
@@ -28,6 +28,7 @@
 #2.7 - Added -MSIZapPurge for immediate permanent deletion of orphaned installer cache candidates and -RebootWhenDone to make rebooting opt-in. Replaced deprecated command usage and updated package detection.
 #2.8 - Enabled HP Image Assistant support for HP and Hewlett-Packard systems. The script now discovers the latest official signed HPIA SoftPaq, extracts it, installs driver and firmware recommendations, handles documented return codes, and retains timestamped reports.
 #2.9 - Added -SkipWinget to bypass all winget detection, installation, and application update processing for environments where winget is unavailable or unsupported.
+#2.10 - Added -NukeOSTs to permanently delete Outlook OST files in standard user-profile locations when they have not been modified in at least one year.
 #
 #Description: Okay so this is a horrible, horrible idea, but I'm going to try and consolidate my 4-batch-file-plus-1-powershell-script tuneup process we had on Automate into a single powershell script.  Yes, I'm crazy.  Yes, this file is going to be full of a lot of bastardized code for a while.
 #
@@ -45,6 +46,7 @@
 #-RebootWhenDone: switch flag, if set it will forcibly reboot the computer after cleanup completes
 #-SkipDefender: switch flag, if set it will skip defender run (also set internally further down if it detects that defender is off and cannot be turned on)
 #-SkipWinget: switch flag, if set it will skip winget detection, installation, and application updates
+#-NukeOSTs: switch flag, if set it will permanently delete Outlook OST files in standard profile locations when they are at least one year old
 
 param (
     # Am I watching this run locally or not?
@@ -60,7 +62,9 @@ param (
     # Do I need to forcibly reboot the computer after cleanup completes?
     [Parameter()][Switch]$RebootWhenDone,
     # Do I need to skip winget detection, installation, and application updates?
-    [Parameter()][Switch]$SkipWinget
+    [Parameter()][Switch]$SkipWinget,
+    # Do I need to permanently delete Outlook OST files that are at least one year old?
+    [Parameter()][Switch]$NukeOSTs
 )
 
 if ($NoMSIZap.IsPresent -and $MSIZapPurge.IsPresent) {
@@ -160,6 +164,54 @@ Function Write-SystemDriveFreeSpaceMetric {
     )
 
     Write-Output "SYSTEM DRIVE FREE SPACE ($Label): $($Metric.FreeGB) GB ($($Metric.FreeBytes) bytes)"
+}
+
+Function Remove-StaleOutlookOstFiles {
+    Param(
+        [Parameter()][Int]$MinimumAgeYears = 1
+    )
+
+    $cutoffDate = (Get-Date).AddYears(-$MinimumAgeYears)
+    $profileRoot = Join-Path -Path $Env:SystemDrive -ChildPath "Users"
+    $outlookOstSearchPaths = @(
+        (Join-Path -Path $profileRoot -ChildPath "*\AppData\Local\Microsoft\Outlook\*.ost"),
+        (Join-Path -Path $profileRoot -ChildPath "*\Local Settings\Application Data\Microsoft\Outlook\*.ost")
+    )
+
+    Write-Output "Searching for Outlook OST files last modified on or before $($cutoffDate.ToString("yyyy-MM-dd HH:mm:ss"))..."
+
+    $ostFiles = foreach ($searchPath in $outlookOstSearchPaths) {
+        Get-ChildItem -Path $searchPath -File -Force -ErrorAction SilentlyContinue
+    }
+
+    $ostFiles = @($ostFiles | Sort-Object -Property FullName -Unique)
+    if (-not $ostFiles) {
+        Write-Output "No Outlook OST files found in standard user-profile locations."
+        return
+    }
+
+    $staleOstFiles = @($ostFiles | Where-Object { $_.LastWriteTime -le $cutoffDate })
+    if (-not $staleOstFiles) {
+        Write-Output "No Outlook OST files are old enough for deletion."
+        return
+    }
+
+    Write-Output "Found $($staleOstFiles.Count) Outlook OST file(s) at least $MinimumAgeYears year(s) old. Permanently deleting..."
+    $deletedOstCount = 0
+
+    foreach ($ostFile in $staleOstFiles) {
+        try {
+            Write-Output "Deleting stale Outlook OST: $($ostFile.FullName) LastWriteTime=$($ostFile.LastWriteTime.ToString("o")) SizeBytes=$($ostFile.Length)"
+            Remove-Item -LiteralPath $ostFile.FullName -Force -ErrorAction Stop
+            $deletedOstCount += 1
+        } catch {
+            Write-Output "WARNING ---------- Failed to delete stale Outlook OST $($ostFile.FullName)"
+            $script:ErrorCount += 1
+            $script:ErrorLog += "Failed to delete stale Outlook OST $($ostFile.FullName).  "
+        }
+    }
+
+    Write-Output "Deleted $deletedOstCount of $($staleOstFiles.Count) stale Outlook OST file(s)."
 }
 
 Function Install-PsExec {
@@ -808,6 +860,11 @@ Get-ChildItem "C:\ProgramData\Intuit\QuickBooks 20*\Components\DownloadQB*\SPatc
 Get-ChildItem "C:\ProgramData\Intuit\QuickBooks 20*\Components\QBUpdateCache" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Get-ChildItem "C:\ProgramData\Intuit\Quickbooks Enterprise Solutions*\Components\DownloadQB*" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Get-ChildItem "C:\ProgramData\Intuit\Quickbooks Enterprise Solutions*\Components\QBUpdateCache*" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+if ($NukeOSTs.IsPresent) {
+    Remove-StaleOutlookOstFiles
+} else {
+    Write-Output "Skipping stale Outlook OST deletion because -NukeOSTs was not supplied."
+}
 
 #STEP 12 - Use Winget to upgrade specific applications
 if ($SkipWinget.IsPresent) {
