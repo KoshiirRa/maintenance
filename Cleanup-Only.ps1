@@ -1,5 +1,5 @@
 #Author: Marty Marks
-#Revision: 3.0
+#Revision: 3.1
 #
 #History:
 #1 - initial commit
@@ -30,11 +30,11 @@
 #2.9 - Added -SkipWinget to bypass all winget detection, installation, and application update processing for environments where winget is unavailable or unsupported.
 #2.10 - Added -NukeOSTs to permanently delete Outlook OST files in standard user-profile locations when they have not been modified in at least one year.
 #3.0 - Forked into a Cleanup-Only version of the script.  Removed all non-cleanup-related functions and blocks.
+#3.1 - Added print spool clearing.  Added a -skipLogout flag (this is not getting reconciled into the full tuneup script)
 #
 #Description: Okay so this is a horrible, horrible idea, but I'm going to try and consolidate my 4-batch-file-plus-1-powershell-script tuneup process we had on Automate into a single powershell script.  Yes, I'm crazy.  Yes, this file is going to be full of a lot of bastardized code for a while.
 #
 #FUTURE PLANS
-#-Holy crap wipe out the System32\Spool\Printers folder
 #--65534 = 
 #--65533 = 
 #-find a way to strip out the old Dell Command Update
@@ -46,6 +46,7 @@
 #-NoRebase: switch flag, if set it will skip OS Rebase
 #-RebootWhenDone: switch flag, if set it will forcibly reboot the computer after cleanup completes
 #-NukeOSTs: switch flag, if set it will permanently delete Outlook OST files in standard profile locations when they are at least one year old
+#-SkipLogout: skips the log everyone out step completely (useful for terminal servers)
 
 param (
     # Am I watching this run locally or not?
@@ -59,7 +60,8 @@ param (
     # Do I need to forcibly reboot the computer after cleanup completes?
     [Parameter()][Switch]$RebootWhenDone,
     # Do I need to skip winget detection, installation, and application updates?
-    [Parameter()][Switch]$NukeOSTs
+    [Parameter()][Switch]$NukeOSTs,
+    [Parameter()][Switch]$SkipLogout
 )
 
 if ($NoMSIZap.IsPresent -and $MSIZapPurge.IsPresent) {
@@ -296,49 +298,53 @@ $HomeSKU = $false
 #Step 1 - Sign out all users (unless we're on an attended run in which case skip the specified user)
 #Check to see if we're on a SKU that can actually do this because Home can't...
 $edition = Get-WindowsEdition -Online
-if ($edition.Edition -notcontains "Home") {
-    if ([string]::IsNullOrEmpty($AttendedRun)) {
-        #log everyone off
-        Write-Output "Logging off all users..."
-        quser | Select-Object -Skip 1 | ForEach-Object {
-            $id = ($_ -split ' +')[-6]
-            if($id -match "^\d+$") {
-                logoff $id
-            } else {
-                $id = ($_ -split ' +')[-5]
+if ([string]::IsNullOrEmpty($SkipLogout)) {
+    if ($edition.Edition -notcontains "Home") {
+        if ([string]::IsNullOrEmpty($AttendedRun)) {
+            #log everyone off
+            Write-Output "Logging off all users..."
+            quser | Select-Object -Skip 1 | ForEach-Object {
+                $id = ($_ -split ' +')[-6]
                 if($id -match "^\d+$") {
                     logoff $id
                 } else {
-                    $id = ($_ -split ' +')[-7]
+                    $id = ($_ -split ' +')[-5]
                     if($id -match "^\d+$") {
                         logoff $id
                     } else {
-                        Write-Output "Something really went wacky here, unable to sign someone out?"
-                        $ErrorCount++
-                        $ErrorLog += "Error signing people out!  "
+                        $id = ($_ -split ' +')[-7]
+                        if($id -match "^\d+$") {
+                            logoff $id
+                        } else {
+                            Write-Output "Something really went wacky here, unable to sign someone out?"
+                            $ErrorCount++
+                            $ErrorLog += "Error signing people out!  "
+                        }
                     }
                 }
             }
+        } else {
+            #log off all users except the specified user
+            Write-Output "Logging off all users except for $AttendedRun..."
+            $users = (((quser) -replace '^>', '') -replace '\s{2,}', ',').Trim() | ForEach-Object { if ($_.Split(',').Count -eq 5) { Write-Output ($_ -replace '(^[^,]+)', '$1,')} else { Write-Output $_ } } | ConvertFrom-Csv
+            ForEach ($user in $users) {
+            if ([string]$user.username -like "*$AttendedRun*") {
+                Write-Output "Skipping $AttendedRun..."
+            } else {
+                logoff $user.ID
+            }
+            }
         }
     } else {
-        #log off all users except the specified user
-        Write-Output "Logging off all users except for $AttendedRun..."
-        $users = (((quser) -replace '^>', '') -replace '\s{2,}', ',').Trim() | ForEach-Object { if ($_.Split(',').Count -eq 5) { Write-Output ($_ -replace '(^[^,]+)', '$1,')} else { Write-Output $_ } } | ConvertFrom-Csv
-        ForEach ($user in $users) {
-         if ([string]$user.username -like "*$AttendedRun*") {
-             Write-Output "Skipping $AttendedRun..."
-         } else {
-             logoff $user.ID
-         }
-        }
+        Write-Output "Home SKU, no query support, skipping to next step..."
+        Write-Output "!!! ---- WARNING: Assume there will be errors on temp file cleanup since we can't ensure everyone is signed out. ---- !!!"
+        $ErrorCount += 1
+        $ErrorLog += "Home SKU - WARNING - cannot log out users.  "
+        $HomeSKU = $true
+        #Maybe in the future reboot the PC and then run the script again with a flag.
     }
 } else {
-    Write-Output "Home SKU, no query support, skipping to next step..."
-    Write-Output "!!! ---- WARNING: Assume there will be errors on temp file cleanup since we can't ensure everyone is signed out. ---- !!!"
-    $ErrorCount += 1
-    $ErrorLog += "Home SKU - WARNING - cannot log out users.  "
-    $HomeSKU = $true
-    #Maybe in the future reboot the PC and then run the script again with a flag.
+    Write-Output "Skipping logout, doing it live! (EXPECT ERRORS)"
 }
 
 #Step 2 - Clean up temp files, caches, Java stuff, etc in all user profiles
@@ -528,12 +534,15 @@ if ($NukeOSTs.IsPresent) {
 #STEP 12 - Use Winget to upgrade specific applications
 # OMMITED IN THIS VERSION OF THE SCRIPT
 
-
 #STEP 13 - Windows Defender Operations
 # OMMITED IN THIS VERSION OF THE SCRIPT
 
+#STEP 14 - Clean that print spooler out!
+Stop-Service -Name Spooler
+Remove-Item -Path "C:\Windows\System32\spool\PRINTERS\*" -Force -ErrorAction SilentlyContinue
+Start-Service -Name Spooler
 
-#STEP 14 - Clean up after ourselves and optionally reboot
+#STEP 15 - Clean up after ourselves and optionally reboot
 Remove-Item -Path "$Env:SystemDrive\PsExec.exe" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "C:\Temp\PSTools.zip" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "C:\Temp\PSTools" -Force -Recurse -ErrorAction SilentlyContinue

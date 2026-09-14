@@ -1,5 +1,5 @@
 #Author: Marty Marks
-#Revision: 2.10
+#Revision: 2.11
 #
 #History:
 #1 - initial commit
@@ -29,11 +29,11 @@
 #2.8 - Enabled HP Image Assistant support for HP and Hewlett-Packard systems. The script now discovers the latest official signed HPIA SoftPaq, extracts it, installs driver and firmware recommendations, handles documented return codes, and retains timestamped reports.
 #2.9 - Added -SkipWinget to bypass all winget detection, installation, and application update processing for environments where winget is unavailable or unsupported.
 #2.10 - Added -NukeOSTs to permanently delete Outlook OST files in standard user-profile locations when they have not been modified in at least one year.
+#2.11 - Added print spooler clearing
 #
 #Description: Okay so this is a horrible, horrible idea, but I'm going to try and consolidate my 4-batch-file-plus-1-powershell-script tuneup process we had on Automate into a single powershell script.  Yes, I'm crazy.  Yes, this file is going to be full of a lot of bastardized code for a while.
 #
 #FUTURE PLANS
-#-Holy crap wipe out the System32\Spool\Printers folder
 #--65534 = 
 #--65533 = 
 #-find a way to strip out the old Dell Command Update
@@ -920,7 +920,13 @@ if ($SkipDefender.IsPresent -or $SkipDefender -eq "TRUE") {
     Remove-MpThreat
 }
 
-#STEP 14 - Clean up after ourselves and optionally reboot
+#STEP 14 - Clean that print spooler out!
+Stop-Service -Name Spooler
+Remove-Item -Path "C:\Windows\System32\spool\PRINTERS\*" -Force -ErrorAction SilentlyContinue
+Start-Service -Name Spooler
+
+
+#STEP 15 - Clean up after ourselves and optionally reboot
 Remove-Item -Path "$Env:SystemDrive\PsExec.exe" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "C:\Temp\PSTools.zip" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "C:\Temp\PSTools" -Force -Recurse -ErrorAction SilentlyContinue
